@@ -1,19 +1,8 @@
-# Dùng grok-tool trong VS Code + lấy API key Sub2API
+# Chạy tool trong VS Code, lấy key Sub2API
 
-Chạy tool bằng **Terminal trong VS Code**, rồi lấy key từ Sub2API để gọi Grok (OpenAI-compatible). Không dán key / mật khẩu thật vào repo hay chat công khai.
+Mở folder `grok_tool` trong VS Code (cái có `main.py`), bấm `` Ctrl+` `` ra terminal. Đứng đúng thư mục đó.
 
-## 1. Mở project
-
-1. Cài [VS Code](https://code.visualstudio.com/).
-2. **File → Open Folder** → chọn thư mục `grok_tool` (trong repo clone: `grok-tool-/grok_tool`).
-3. Mở terminal: `` Ctrl+` `` (hoặc **Terminal → New Terminal**).  
-   Prompt phải đứng trong `grok_tool` (có `main.py`, `config.example.json`).
-
-```powershell
-cd D:\path\to\grok-tool-\grok_tool
-```
-
-## 2. Cài lần đầu (một lần)
+## Cài một lần
 
 ```powershell
 python -m venv venv
@@ -21,125 +10,87 @@ python -m venv venv
 copy config.example.json config.json
 ```
 
-Sửa `config.json` **trên máy bạn** (file này gitignore, không commit):
+Sửa `config.json` trên máy mình, đừng commit file này:
 
-- `fixed_password` — mật khẩu đặt cho acc Grok mới
-- `sub2api.sub2api_url` — ví dụ `http://127.0.0.1:8080`
-- `sub2api.sub2api_user` / `sub2api_pass` — tài khoản **admin** Sub2API (để tool import SSO)
-- `name_prefix` = `grok free`, `group` = `grok free`
+- `fixed_password` — pass đặt cho acc Grok mới
+- `sub2api_url` — thường `http://127.0.0.1:8080`
+- `sub2api_user` / `sub2api_pass` — acc **admin** Sub2API, để tool nhét SSO vào
+- `name_prefix` và `group` để `grok free` nếu đang dùng convention đó
 
-Linux / WSL:
+WSL thì `python3 -m venv venv` rồi `source venv/bin/activate`. Interpreter VS Code: `Ctrl+Shift+P` → Python: Select Interpreter → chọn `venv`.
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp config.example.json config.json
-```
+## Chạy
 
-Chọn interpreter: `Ctrl+Shift+P` → **Python: Select Interpreter** → `.\venv\Scripts\python.exe`.
+Cần Sub2API đang mở (`:8080`). Protocol thì thêm solver.
 
-## 3. Chạy từ terminal VS Code
-
-Mở **hai** (hoặc ba) tab terminal (`+` trên panel Terminal).
-
-**Tab 1 — Turnstile solver** (bắt buộc nếu `--backend protocol`):
+Terminal 1:
 
 ```powershell
 .\venv\Scripts\python.exe -m services.turnstile_solver.start
-# hoặc: .\CHAY_SOLVER.bat
 ```
 
-Đợi `http://127.0.0.1:5072`.
+Chờ `http://127.0.0.1:5072` lên.
 
-**Tab 2 — Sub2API** phải đang chạy sẵn (app của bạn, mặc định `:8080`). Tool chỉ *gọi* Sub2API, không cài hộ.
-
-**Tab 3 — reg**
+Terminal 2:
 
 ```powershell
-# 1 acc temp mail, HTTP ~30s
+# temp mail, 1 acc
 .\venv\Scripts\python.exe main.py 0 --count 1 --backend protocol
 
-# Hotmail: 1 dòng trong data/hotmails.txt → tối đa 5 Grok (user / +1 … +4)
+# hotmail (1 dòng hotmails.txt tối đa 5 Grok: mail / +1 … +4)
 .\venv\Scripts\python.exe main.py 1 --count 5 --backend protocol
 
-# Web UI
+# hoặc web
 .\venv\Scripts\python.exe -m web_console.app
 ```
 
-Web: [http://127.0.0.1:8787/#/register](http://127.0.0.1:8787/#/register)
+Web nằm ở http://127.0.0.1:8787/#/register. Chọn Hotmail thì dán list hoặc Browse, Start tự lấy số slot. Tick Auto Sub2API nếu muốn import luôn.
 
-- Chọn **Hotmail** → dán list hoặc **Browse file** → Start (số lượt = số slot alias, không cần ô số lượng).
-- Tick **Auto Sub2API** để import ngay sau khi có SSO.
+Xong thì `data/accounts.txt` có dòng `added_sub2api:grok free 0xx`. Muốn dừng thì ESC hoặc nút Stop.
 
-Thành công: ledger `data/accounts.txt` có `added_sub2api:grok free NNN`.  
-`ESC` hoặc nút **Stop** trên web = dừng.
+## Lấy API key
 
-## 4. Lấy API key từ Sub2API
+Hai thứ khác nhau:
 
-`sub2api_user` / `sub2api_pass` trong `config.json` là **admin import**. Key dùng trong VS Code / Cursor / curl là **token user** trên UI Sub2API — khác nhau.
+- User/pass trong `config.json` = admin, chỉ để **nhét acc** vào Sub2API
+- Key dùng curl / Grok Build / Cursor = token trên giao diện Sub2API
 
-1. Mở Sub2API: [http://127.0.0.1:8080](http://127.0.0.1:8080) (đổi host nếu bạn chạy chỗ khác).
-2. Đăng nhập **user** (hoặc admin tạo user rồi vào trang đó).
-3. Vào mục **令牌 / Tokens / API Keys** (tên menu tùy bản).
-4. **Tạo token** mới. Gán group có acc vừa import (`grok free`) nếu UI hỏi group.
-5. **Copy key một lần** — không commit, không đưa vào README.
+Vào http://127.0.0.1:8080, login user (không phải nhét admin vào header Bearer). Menu thường gọi **令牌**, Tokens hoặc API Keys — tùy bản. Tạo token mới, group chọn `grok free` nếu nó hỏi. Copy key, giữ ở máy, đừng đẩy git.
 
-Acc `grok free 001`, `002`, … do grok-tool đẩy vào sau mỗi lần reg. Token user chỉ *đi qua* pool đó; không phải SSO cookie.
+Acc `grok free 001`, `002`… là slot tool vừa import. Token chỉ đi qua pool đó.
 
-## 5. Gọi API trong terminal VS Code
+## Gọi thử trong terminal
 
-Base OpenAI-compatible (bản local phổ biến):
-
-```text
-http://127.0.0.1:8080/v1
-```
-
-**Không** paste key vào file trong repo. Dùng biến môi trường **User** trên máy bạn:
+Base hay gặp: `http://127.0.0.1:8080/v1`
 
 ```powershell
-# Windows PowerShell — session hiện tại
-$env:SUB2API_KEY = "dán-key-vào-đây"
-$env:SUB2API_BASE = "http://127.0.0.1:8080/v1"
+$env:SUB2API_KEY = "dán key vào đây"
 
-# Liệt kê model (tên model xem trên UI Sub2API)
-curl.exe "$env:SUB2API_BASE/models" -H "Authorization: Bearer $env:SUB2API_KEY"
+curl.exe http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $env:SUB2API_KEY"
 
-# Chat thử — đổi model đúng tên trên Sub2API (vd. Grok 4.5 / grok-4.5)
-curl.exe "$env:SUB2API_BASE/chat/completions" `
+curl.exe http://127.0.0.1:8080/v1/chat/completions `
   -H "Authorization: Bearer $env:SUB2API_KEY" `
   -H "Content-Type: application/json" `
   -d "{\"model\":\"grok-4.5\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}"
 ```
 
-Linux / WSL:
+Tên model lấy trên UI Sub2API, đừng cứng `grok-4.5` nếu bản bạn khác.
+
+Linux:
 
 ```bash
-export SUB2API_KEY='dán-key-vào-đây'
-export SUB2API_BASE='http://127.0.0.1:8080/v1'
-curl "$SUB2API_BASE/models" -H "Authorization: Bearer $SUB2API_KEY"
+export SUB2API_KEY='dán key vào đây'
+curl http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $SUB2API_KEY"
 ```
 
-Grok Build / Codex / công cụ khác: `base_url` = `http://127.0.0.1:8080/v1`, `api_key` hoặc `env_key=SUB2API_KEY`. Đừng set `OPENAI_API_KEY` hệ thống nếu bạn còn dùng OpenAI thật — dễ đè nhầm.
+Grok Build thì `base_url=http://127.0.0.1:8080/v1`, trỏ key qua `env_key=SUB2API_KEY`. Đừng ghi đè `OPENAI_API_KEY` của máy nếu còn dùng OpenAI thiệt.
 
-## 6. Reg OK mà chưa vào Sub2API
+## Reg được mà Sub2API không nhận
 
-Ledger `success` hoặc `success_sub2api…` = đã có acc, import lỗi. Kiểm tra Sub2API đang mở, user/pass admin đúng, rồi chạy lại hàng đợi local (máy bạn):
+Dòng status là `success` hoặc `success_sub2api…` nghĩa là acc đã có, bước import fail. Mở lại Sub2API, check admin, rồi:
 
 ```powershell
 .\venv\Scripts\python.exe -m grokreg.tools.continue_sub2api
 ```
 
-Hoặc bật lại **Auto Sub2API** và không reg trùng email đã thành công.
-
-## 7. Lỗi thường gặp
-
-| Hiện tượng | Việc cần làm |
-|---|---|
-| `401` / key rejected | Tạo lại token trên UI; đừng dùng password admin làm Bearer |
-| `404` `/v1/models` | Thử `/api/v1/models` hoặc xem docs bản Sub2API bạn đang chạy |
-| Có key nhưng không chat được | Acc chưa `added_sub2api`; group token ≠ `grok free` |
-| Protocol timeout | Tab solver `:5072` chưa lên |
-| VS Code không thấy `python` | Select Interpreter → `venv` |
-
-Key, `config.json`, `data/accounts.txt`, `hotmails.txt` **không** được `git add`.
+401 là đang nhét nhầm pass admin vào Bearer, hoặc token chết — tạo lại trên UI. 404 `/v1/models` thì thử `/api/v1/models`. Chat không ra thì acc chưa `added_sub2api` hoặc token sai group. Protocol treo thì nhìn lại tab solver.

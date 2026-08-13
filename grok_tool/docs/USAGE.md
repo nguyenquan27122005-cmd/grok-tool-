@@ -159,9 +159,9 @@ Nếu import fail, status ledger có thể là `success` + hàng đợi retry (`
 
 Tắt import một job web: bỏ tick **Auto Sub2API** (`GROK_SUB2API=0`).
 
-**Lấy API key để gọi chat** (sau khi ledger có `added_sub2api:…`): mở UI Sub2API → **令牌 / Tokens / API Keys** → tạo token user. Admin trong `config.json` chỉ để *import*. Dùng key trong VS Code: [VSCODE.md](VSCODE.md).
+Muốn gọi chat thì vào Sub2API lấy token user (令牌 / API Keys), đừng lấy pass admin trong config. Viết ở [VSCODE.md](VSCODE.md).
 
-Import fail (`success_sub2api…`): Sub2API phải đang chạy, rồi:
+Import lỗi (`success_sub2api…`) thì mở lại Sub2API rồi:
 
 ```bat
 venv\Scripts\python.exe -m grokreg.tools.continue_sub2api

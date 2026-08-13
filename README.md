@@ -163,22 +163,18 @@ CHAY_SOLVER.bat
 
 ---
 
-## VS Code + API key Sub2API
+## VS Code và API key Sub2API
 
-Mở folder `grok_tool` trong VS Code → `` Ctrl+` `` (Terminal). Cài venv, sửa `config.json` local, rồi chạy `main.py` / web như trên. Bài đủ bước: [docs/VSCODE.md](grok_tool/docs/VSCODE.md).
+Mở folder `grok_tool` trong VS Code, `` Ctrl+` `` ra terminal, chạy như mục trên. Viết dài hơn ở [docs/VSCODE.md](grok_tool/docs/VSCODE.md).
 
-**Lấy key sau khi reg** (tool chỉ *import acc* vào Sub2API; key dùng chat nằm trên UI Sub2API):
-
-1. Acc ledger phải là `added_sub2api:grok free NNN`.
-2. Mở [http://127.0.0.1:8080](http://127.0.0.1:8080) → đăng nhập user → **令牌 / Tokens / API Keys** → tạo token, gán group `grok free` nếu có.
-3. Trong terminal VS Code (key chỉ ở máy bạn):
+Reg xong mà ledger có `added_sub2api:grok free 0xx` thì acc đã nằm trong Sub2API. Key chat **không** nằm trong `config.json` — vào http://127.0.0.1:8080, login user, mục 令牌 / Tokens / API Keys, tạo token (group `grok free` nếu nó hỏi).
 
 ```powershell
 $env:SUB2API_KEY = "YOUR_KEY"
 curl.exe http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $env:SUB2API_KEY"
 ```
 
-Admin `sub2api_user` / `sub2api_pass` trong `config.json` **không** phải Bearer cho `/v1`. Đừng commit key.
+User/pass admin trong config chỉ để tool import. Đừng commit key.
 
 ---
 
