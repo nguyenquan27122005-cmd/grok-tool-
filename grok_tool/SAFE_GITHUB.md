@@ -1,5 +1,7 @@
 # Đẩy code lên GitHub mà không lộ thông tin cá nhân
 
+Hướng dẫn dùng tool: [README gốc](../README.md) · [docs/USAGE.md](docs/USAGE.md).
+
 ## Nguyên tắc
 
 | Lên GitHub (OK) | Chỉ máy bạn (CẤM push) |

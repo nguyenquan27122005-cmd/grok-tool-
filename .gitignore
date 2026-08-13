@@ -3,6 +3,7 @@
 !/grok_tool/
 !/.gitignore
 !/README.md
+!/LICENSE
 
 # Inside grok_tool — secrets / personal / runtime
 grok_tool/config.json
