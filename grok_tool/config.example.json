@@ -2,6 +2,7 @@
   "email_provider": "auto_temp",
   "temp_mail_order": ["azpopmail", "tmail_wibu"],
   "hotmail_list": "data/hotmails.txt",
+  "hotmail_max_aliases": 5,
   "proxy": "",
   "headless": false,
   "timeout_otp": 240,

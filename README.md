@@ -24,6 +24,7 @@
 - [Cách hoạt động](#cách-hoạt-động)
 - [Cài đặt](#cài-đặt)
 - [Cách dùng nhanh](#cách-dùng-nhanh)
+- [VS Code + API key Sub2API](#vs-code--api-key-sub2api)
 - [Ba backend](#ba-backend)
 - [CLI](#cli)
 - [Web UI](#web-ui)
@@ -35,7 +36,7 @@
 - [Bảo mật](#bảo-mật)
 - [Disclaimer](#disclaimer)
 
-Chi tiết: [Usage](grok_tool/docs/USAGE.md) · [Config](grok_tool/docs/CONFIG.md) · [Architecture](grok_tool/ARCHITECTURE.md)
+Chi tiết: [Usage](grok_tool/docs/USAGE.md) · [VS Code + API key Sub2API](grok_tool/docs/VSCODE.md) · [Config](grok_tool/docs/CONFIG.md) · [Architecture](grok_tool/ARCHITECTURE.md)
 
 ---
 
@@ -44,7 +45,7 @@ Chi tiết: [Usage](grok_tool/docs/USAGE.md) · [Config](grok_tool/docs/CONFIG.m
 | | |
 |---|---|
 | **Hai đường reg** | Chrome (pydoll, ẩn khỏi màn hình) hoặc protocol HTTP thuần (~30s) |
-| **Mail linh hoạt** | Temp smart (azpop ↔ tmail failover), Hotmail list, Mail.tm |
+| **Mail linh hoạt** | Temp smart (azpop ↔ tmail failover), Hotmail plus-alias (1 acc → 5 Grok), Mail.tm |
 | **OTP tự lấy** | Poll inbox, parse mã, điền form / gRPC |
 | **Turnstile** | Solver local Camoufox `:5072` — không cướp cửa sổ |
 | **Sub2API** | SSO → `POST /api/v1/admin/grok/sso-to-oauth`, tên `grok free NNN` |
@@ -133,6 +134,7 @@ Mở [http://127.0.0.1:8787](http://127.0.0.1:8787)
 | Số lượng | `1` một acc · `0` chạy tới khi Stop |
 | Cách reg | `HTTP ẩn` (protocol) · `Chrome ẩn` · `auto` |
 | Auto Sub2API | import SSO sau khi reg OK |
+| Hotmail | dán list / Browse file — 1 acc → tối đa 5 Grok (`+1`…`+4`) |
 | Ẩn Chrome | cửa sổ ra ngoài màn hình, không nhảy focus |
 
 Giữ cửa sổ CMD web **mở**. Bấm Stop trên UI hoặc `ESC` ở process reg.
@@ -158,6 +160,25 @@ CHAY_SOLVER.bat
 ```
 
 Đợi `http://127.0.0.1:5072` lên, rồi mới bấm reg HTTP. Để cửa sổ solver mở.
+
+---
+
+## VS Code + API key Sub2API
+
+Mở folder `grok_tool` trong VS Code → `` Ctrl+` `` (Terminal). Cài venv, sửa `config.json` local, rồi chạy `main.py` / web như trên. Bài đủ bước: [docs/VSCODE.md](grok_tool/docs/VSCODE.md).
+
+**Lấy key sau khi reg** (tool chỉ *import acc* vào Sub2API; key dùng chat nằm trên UI Sub2API):
+
+1. Acc ledger phải là `added_sub2api:grok free NNN`.
+2. Mở [http://127.0.0.1:8080](http://127.0.0.1:8080) → đăng nhập user → **令牌 / Tokens / API Keys** → tạo token, gán group `grok free` nếu có.
+3. Trong terminal VS Code (key chỉ ở máy bạn):
+
+```powershell
+$env:SUB2API_KEY = "YOUR_KEY"
+curl.exe http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $env:SUB2API_KEY"
+```
+
+Admin `sub2api_user` / `sub2api_pass` trong `config.json` **không** phải Bearer cho `/v1`. Đừng commit key.
 
 ---
 
@@ -253,7 +274,7 @@ Giải thích từng key: [`docs/CONFIG.md`](grok_tool/docs/CONFIG.md).
 | Nhóm | Key quan trọng |
 |------|----------------|
 | Mật khẩu Grok | `fixed_password` |
-| Mail | `email_provider`, `temp_mail_order`, `hotmail_list` |
+| Mail | `email_provider`, `temp_mail_order`, `hotmail_list`, `hotmail_max_aliases` (mặc định 5) |
 | Sub2API | `sub2api.enabled`, `sub2api_url`, user/pass, `name_prefix`, `group` |
 | Solver | `turnstile.solver_url` |
 | Chrome | `chrome_window_mode` (`lygaz` = ẩn), `chrome_debug_port` |

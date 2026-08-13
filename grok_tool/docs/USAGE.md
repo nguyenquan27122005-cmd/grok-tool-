@@ -10,7 +10,7 @@ Tài liệu này đi từ lần clone đầu đến job chạy ổn. Bản rút 
 | Chrome | Chỉ backend `browser` | pydoll điều khiển Chrome thật |
 | Sub2API đang chạy | Nếu muốn import | Mặc định `http://localhost:8080` |
 | Turnstile solver | Backend `protocol` / `auto` | `CHAY_SOLVER.bat` → `:5072` |
-| Hotmail list | Chỉ khi chọn mail `1` | `data/hotmails.txt` |
+| Hotmail list | Chỉ khi chọn mail `1` | `data/hotmails.txt` — 1 dòng = tối đa 5 Grok (`user`, `user+1@` … `+4`) |
 
 ## 2. Cài lần đầu (Windows)
 
@@ -94,6 +94,18 @@ Tham số positional:
 
 `--provider hotmail` cũng được (không cần số).
 
+**Hotmail plus-alias:** mỗi dòng trong `hotmails.txt` dùng được tối đa `hotmail_max_aliases` lần (mặc định **5**):
+
+```text
+user@hotmail.com        → Grok 1
+user+1@hotmail.com      → Grok 2
+user+2@hotmail.com      → Grok 3
+user+3@hotmail.com      → Grok 4
+user+4@hotmail.com      → Grok 5
+```
+
+OTP vẫn về inbox gốc (Graph / IMAP). Hết 5 slot mới chuyển dòng sang `hotmails_used.txt`. Ledger: `data/hotmail_aliases.json`. Fail / rate-limit **không** đốt alias. `hotmail_max_aliases: 1` = hành vi cũ (1 dòng = 1 Grok).
+
 ### C. Menu terminal
 
 ```bat
@@ -146,6 +158,14 @@ Group: `grok free` (`sub2api.group`). Số bắt đầu: `sub2api.start_number`.
 Nếu import fail, status ledger có thể là `success` + hàng đợi retry (`delivery_queue.json`, local).
 
 Tắt import một job web: bỏ tick **Auto Sub2API** (`GROK_SUB2API=0`).
+
+**Lấy API key để gọi chat** (sau khi ledger có `added_sub2api:…`): mở UI Sub2API → **令牌 / Tokens / API Keys** → tạo token user. Admin trong `config.json` chỉ để *import*. Dùng key trong VS Code: [VSCODE.md](VSCODE.md).
+
+Import fail (`success_sub2api…`): Sub2API phải đang chạy, rồi:
+
+```bat
+venv\Scripts\python.exe -m grokreg.tools.continue_sub2api
+```
 
 ## 7. Google Sheet (tùy chọn)
 

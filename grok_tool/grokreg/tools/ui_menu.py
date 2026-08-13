@@ -80,12 +80,19 @@ def hotmail_count() -> int:
     p = ROOT / "data" / "hotmails.txt"
     if not p.exists():
         return 0
-    n = 0
-    for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-        s = ln.strip()
-        if s and not s.startswith("#"):
-            n += 1
-    return n
+    try:
+        from grokreg.core.config import load_config
+        from grokreg.mail.providers import HotmailProvider
+
+        slots, lines = HotmailProvider.from_config(p, load_config()).available_count()
+        return slots or lines
+    except Exception:
+        n = 0
+        for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            s = ln.strip()
+            if s and not s.startswith("#"):
+                n += 1
+        return n
 
 
 def py_exe() -> Path:
@@ -174,7 +181,7 @@ MAIL_MAP = {
 def pick_mail() -> str | None:
     title("Bước 1/2 — Loại email")
     print(f"  {Fore.CYAN}[0]{Style.RESET_ALL}  Temp SMART     {Fore.MAGENTA}(khuyên dùng){Style.RESET_ALL}")
-    print(f"  {Fore.CYAN}[1]{Style.RESET_ALL}  Hotmail        data\\hotmails.txt")
+    print(f"  {Fore.CYAN}[1]{Style.RESET_ALL}  Hotmail        1 acc → tối đa 5 Grok (+1…+4)")
     print(f"  {Fore.CYAN}[2]{Style.RESET_ALL}  Temp azpop     only")
     print(f"  {Fore.CYAN}[3]{Style.RESET_ALL}  Temp tmail     only")
     print()

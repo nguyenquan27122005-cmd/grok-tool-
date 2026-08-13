@@ -887,22 +887,45 @@ async def fill_otp_on_page(tab: Any, otp: str) -> bool:
 def find_hotmail_session_for_email(
     hotmail: HotmailProvider, email: str, default_client_id: str
 ) -> Optional[EmailSession]:
-    """Match hotmails.txt line for an email already on the OTP page."""
-    email_l = email.lower()
+    """Match hotmails.txt line for an email already on the OTP page.
+
+    Accepts plus-aliases (``user+2@domain``) and maps them back to the mailbox.
+    """
+    from grokreg.mail import hotmail_alias as halt
+
+    email_l = (email or "").strip().lower()
+    max_a = getattr(hotmail, "max_aliases", 5)
     for raw in hotmail._read_lines():
         parts = [p.strip() for p in raw.split("|")]
         if len(parts) < 2:
             continue
-        if parts[0].lower() != email_l:
+        mailbox = parts[0]
+        if not halt.alias_matches_mailbox(email_l, mailbox, max_a) and mailbox.lower() != email_l:
             continue
+        idx = halt.alias_index_of(email_l, mailbox)
+        if hasattr(hotmail, "_build_session"):
+            sess = hotmail._build_session(
+                raw, alias_index=idx, default_client_id=default_client_id
+            )
+            # Keep the page address if it already is the alias (index 0 = mailbox).
+            if email_l:
+                sess.address = email.strip()
+            return sess
         return EmailSession(
-            address=parts[0],
+            address=email.strip() or mailbox,
             password=parts[1],
             provider="hotmail",
             refresh_token=parts[2] if len(parts) >= 3 else "",
             client_id=parts[3] if len(parts) >= 4 else default_client_id,
             raw_line=raw,
             list_path=hotmail.list_path,
+            mailbox=mailbox,
+            extra={
+                "mailbox": mailbox,
+                "main_email": mailbox,
+                "alias_index": idx,
+                "max_aliases": max_a,
+            },
         )
     return None
 

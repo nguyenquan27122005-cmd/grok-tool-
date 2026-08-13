@@ -26,7 +26,7 @@ class GrokToolPlugin(BaseToolPlugin):
                 default="0",
                 options=[
                     FieldOption("0", "Temp SMART", "azpop ↔ tmail failover"),
-                    FieldOption("1", "Hotmail", "data/hotmails.txt"),
+                    FieldOption("1", "Hotmail", "1 acc → tối đa 5 Grok (mail / mail+1 … +4)"),
                     FieldOption("2", "Temp azpop only", ""),
                     FieldOption("3", "Temp tmail.wibu only", ""),
                 ],
@@ -73,13 +73,33 @@ class GrokToolPlugin(BaseToolPlugin):
             return root / "venv" / "Scripts" / "python.exe"
         return root / "venv" / "bin" / "python"
 
+    @staticmethod
+    def _is_hotmail_mail(mail: str) -> bool:
+        n = (mail or "").strip().lower().replace(" ", "")
+        return n in ("1", "hotmail", "outlook", "ms", "microsoft")
+
+    def preflight(self, params: dict[str, Any], root: Path) -> None:
+        if not self._is_hotmail_mail(str(params.get("mail") or "0")):
+            return
+        pool = self.hotmail_pool(root)
+        slots = int(pool.get("slots") or pool.get("count") or 0)
+        if slots <= 0:
+            raise RuntimeError("Pool Hotmail trống / hết slot alias — import acc rồi Start")
+
     def build_command(self, params: dict[str, Any], root: Path) -> list[str]:
         py = self._py(root)
         if not py.exists():
             raise RuntimeError(f"Python venv not found: {py}")
         mail = str(params.get("mail") or "0")
-        count = int(params.get("count") if params.get("count") is not None else 1)
-        count = max(0, min(99, count))
+        if self._is_hotmail_mail(mail):
+            pool = self.hotmail_pool(root)
+            count = int(pool.get("slots") or pool.get("count") or 0)
+            if count <= 0:
+                raise RuntimeError("Pool Hotmail trống / hết slot alias — import acc trước khi Start")
+            count = min(count, 2000)
+        else:
+            count = int(params.get("count") if params.get("count") is not None else 1)
+            count = max(0, min(99, count))
         backend = str(params.get("backend") or "protocol").strip().lower()
         if backend not in ("protocol", "auto", "browser"):
             backend = "protocol"
@@ -240,9 +260,16 @@ class GrokToolPlugin(BaseToolPlugin):
         hotmails = 0
         hp = root / "data" / "hotmails.txt"
         if hp.exists():
-            for ln in hp.read_text(encoding="utf-8", errors="ignore").splitlines():
-                if ln.strip() and not ln.strip().startswith("#"):
-                    hotmails += 1
+            try:
+                from grokreg.core.config import load_config
+                from grokreg.mail.providers import HotmailProvider
+
+                slots, lines = HotmailProvider.from_config(hp, load_config()).available_count()
+                hotmails = slots or lines
+            except Exception:
+                for ln in hp.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    if ln.strip() and not ln.strip().startswith("#"):
+                        hotmails += 1
         counter = 0
         cp = root / "data" / "sub2api_name_counter.json"
         if cp.exists():
@@ -275,3 +302,108 @@ class GrokToolPlugin(BaseToolPlugin):
                 f"{fail} fail · {attempts} lượt thử"
             ),
         }
+
+    def _hotmail_path(self, root: Path) -> Path:
+        try:
+            from grokreg.core.config import load_config
+
+            rel = str(load_config().get("hotmail_list") or "data/hotmails.txt")
+        except Exception:
+            rel = "data/hotmails.txt"
+        p = Path(rel)
+        return p if p.is_absolute() else (root / p)
+
+    def hotmail_pool(self, root: Path) -> dict[str, Any]:
+        from grokreg.mail.hotmail_import import parse_hotmail_text
+
+        path = self._hotmail_path(root)
+        raw = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+        parsed = parse_hotmail_text(raw)
+        accounts: list[dict[str, Any]] = []
+        for rec in parsed["rows"]:
+            accounts.append(
+                {
+                    "email": rec["email"],
+                    "has_password": bool(rec.get("password")),
+                    "has_refresh": bool(rec.get("refresh")),
+                    "has_client_id": bool(rec.get("client_id")),
+                }
+            )
+        slots = len(accounts)
+        lines = len(accounts)
+        max_aliases = 5
+        try:
+            from grokreg.core.config import load_config
+            from grokreg.mail.hotmail_alias import max_aliases_from_config
+            from grokreg.mail.providers import HotmailProvider
+
+            cfg = load_config()
+            max_aliases = max_aliases_from_config(cfg)
+            if path.exists():
+                slots, lines = HotmailProvider.from_config(path, cfg).available_count()
+        except Exception:
+            pass
+        return {
+            "path": "data/hotmails.txt",
+            "count": len(accounts),
+            "lines": lines,
+            "slots": slots,
+            "max_aliases": max_aliases,
+            "accounts": accounts[:200],
+        }
+
+    def import_hotmails(
+        self, root: Path, text: str, mode: str = "append"
+    ) -> dict[str, Any]:
+        from grokreg.mail.hotmail_import import format_line, parse_hotmail_text
+
+        parsed = parse_hotmail_text(text)
+        if not parsed["rows"] and not parsed["errors"]:
+            raise ValueError("Không thấy dòng Hotmail nào")
+        if not parsed["rows"]:
+            raise ValueError(
+                f"Không parse được dòng hợp lệ ({parsed['invalid']} lỗi). "
+                "Dùng email|password|refresh|client_id"
+            )
+
+        path = self._hotmail_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing_raw = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+        existing = parse_hotmail_text(existing_raw)
+        have = {r["email"].lower(): r for r in existing["rows"]}
+
+        mode_n = (mode or "append").strip().lower()
+        added = 0
+        updated = 0
+        skipped = 0
+        if mode_n == "replace":
+            have = {}
+        for rec in parsed["rows"]:
+            key = rec["email"].lower()
+            if key in have and mode_n != "replace":
+                skipped += 1
+                continue
+            if key in have:
+                updated += 1
+            else:
+                added += 1
+            have[key] = rec
+
+        lines = [
+            format_line(r["email"], r["password"], r["refresh"], r["client_id"])
+            for r in have.values()
+        ]
+        path.write_text(("\n".join(lines) + ("\n" if lines else "")), encoding="utf-8")
+        pool = self.hotmail_pool(root)
+        pool.update(
+            {
+                "ok": True,
+                "added": added,
+                "updated": updated,
+                "skipped": skipped,
+                "invalid": parsed["invalid"],
+                "errors": parsed["errors"],
+                "mode": "replace" if mode_n == "replace" else "append",
+            }
+        )
+        return pool

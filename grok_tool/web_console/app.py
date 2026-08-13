@@ -45,6 +45,11 @@ class StopBody(BaseModel):
     job_id: Optional[str] = None
 
 
+class HotmailImportBody(BaseModel):
+    text: str = ""
+    mode: str = "append"  # append | replace
+
+
 def _tool_public(p) -> dict[str, Any]:
     m = p.meta
     return {
@@ -116,6 +121,35 @@ def tool_results(tool_id: str, limit: int = Query(100, ge=1, le=2000)):
     except KeyError:
         raise HTTPException(404, "tool not found")
     return {"results": p.parse_results(ROOT, limit=limit)}
+
+
+@app.get("/api/tools/{tool_id}/hotmails")
+def tool_hotmails(tool_id: str):
+    try:
+        p = get_plugin(tool_id)
+    except KeyError:
+        raise HTTPException(404, "tool not found")
+    fn = getattr(p, "hotmail_pool", None)
+    if not callable(fn):
+        raise HTTPException(404, "tool không hỗ trợ Hotmail pool")
+    return fn(ROOT)
+
+
+@app.post("/api/tools/{tool_id}/hotmails")
+def tool_hotmails_import(tool_id: str, body: HotmailImportBody):
+    try:
+        p = get_plugin(tool_id)
+    except KeyError:
+        raise HTTPException(404, "tool not found")
+    fn = getattr(p, "import_hotmails", None)
+    if not callable(fn):
+        raise HTTPException(404, "tool không hỗ trợ nhập Hotmail")
+    try:
+        return fn(ROOT, body.text or "", body.mode or "append")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e
 
 
 @app.get("/api/jobs")

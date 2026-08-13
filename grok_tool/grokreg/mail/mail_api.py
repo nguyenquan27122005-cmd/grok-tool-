@@ -74,6 +74,17 @@ class EmailSession:
     raw_line: str = ""
     list_path: Optional[Path] = None
     extra: dict[str, Any] = field(default_factory=dict)
+    mailbox: str = ""
+
+    @property
+    def mailbox_address(self) -> str:
+        """Outlook mailbox for Graph/IMAP. Plus-alias lives in ``address``."""
+        mb = (self.mailbox or "").strip()
+        if mb:
+            return mb
+        extra = self.extra or {}
+        mb = str(extra.get("mailbox") or extra.get("main_email") or "").strip()
+        return mb or self.address
 
 
 # Only accept OTP from xAI / Grok related mails — never random digits in Outlook welcome etc.
@@ -367,11 +378,12 @@ class MailApiClient:
 
     def _email_data_line(self, session: EmailSession) -> str:
         cid = self._client_id(session)
-        return f"{session.address}|{session.password}|{session.refresh_token or ''}|{cid}"
+        mb = session.mailbox_address
+        return f"{mb}|{session.password}|{session.refresh_token or ''}|{cid}"
 
     def _mapping(self, session: EmailSession) -> dict[str, str]:
         return {
-            "email": session.address,
+            "email": session.mailbox_address,
             "password": session.password,
             "refresh_token": session.refresh_token or "",
             "client_id": self._client_id(session),
@@ -422,7 +434,7 @@ class MailApiClient:
         last_err = ""
         for mode in modes:
             body = {
-                "hotmail_email": session.address,
+                "hotmail_email": session.mailbox_address,
                 "refresh_token": session.refresh_token or "",
                 "client_id": cid,
                 "auth_mode": mode,
@@ -532,7 +544,7 @@ class MailApiClient:
                     break
             url = f"{base}/api/read-inbox"
             body = {
-                "hotmail_email": session.address,
+                "hotmail_email": session.mailbox_address,
                 "refresh_token": session.refresh_token or "",
                 "client_id": self._client_id(session),
                 "auth_mode": "graph",
@@ -656,14 +668,14 @@ class MailApiClient:
             (
                 f"{base}/api/get-inbox",
                 {
-                    "data": f"{session.address}|{session.refresh_token or ''}|{cid}|",
+                    "data": f"{session.mailbox_address}|{session.refresh_token or ''}|{cid}|",
                     "mode": "graph",
                 },
             ),
             (
                 f"{base}/api/get-inbox",
                 {
-                    "data": f"{session.address}|{session.refresh_token or ''}|{cid}|",
+                    "data": f"{session.mailbox_address}|{session.refresh_token or ''}|{cid}|",
                     "mode": "oauth",
                 },
             ),
@@ -671,7 +683,7 @@ class MailApiClient:
             (
                 f"{base}/api/graph_messages",
                 {
-                    "email": session.address,
+                    "email": session.mailbox_address,
                     "refresh_token": session.refresh_token or "",
                     "client_id": cid,
                 },
@@ -709,7 +721,7 @@ class MailApiClient:
     ) -> Optional[str]:
         """Any host that speaks graph_messages / graph_code style API."""
         cid = self._client_id(session)
-        email = session.address
+        email = session.mailbox_address
         rt = session.refresh_token or ""
         pw = session.password
         endpoints = endpoints or [

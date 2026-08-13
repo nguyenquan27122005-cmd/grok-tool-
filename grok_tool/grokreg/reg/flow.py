@@ -193,11 +193,11 @@ def acquire_email_session(
 
     def _hotmail_handle() -> Optional[HotmailProvider]:
         if list_path.exists():
-            return HotmailProvider(list_path)
+            return HotmailProvider.from_config(list_path, config)
         return None
 
     if mode == "hotmail":
-        hotmail = HotmailProvider(list_path)
+        hotmail = HotmailProvider.from_config(list_path, config)
         return hotmail.acquire(default_client_id=default_cid), hotmail
 
     if mode == "mailtm":
@@ -222,7 +222,7 @@ def acquire_email_session(
         return _create_temp_session(which, azpop, tmail_wibu, config), _hotmail_handle()
 
     # ---- auto: hotmail first, else auto_temp ----
-    hotmail = HotmailProvider(list_path)
+    hotmail = HotmailProvider.from_config(list_path, config)
     usable, total = hotmail.available_count()
     if usable > 0:
         try:

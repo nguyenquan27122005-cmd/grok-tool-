@@ -183,6 +183,11 @@ def register_one_protocol(config: dict[str, Any]) -> ProtocolResult:
                 status = f"success_sub2api_fail:{str(e)[:80]}"
 
         save_account(save_path, email, password, status)
+        if hotmail:
+            try:
+                hotmail.mark_used(email_session)
+            except Exception as e:
+                log.warning("[protocol] hotmail mark_used: %s", e)
         return ProtocolResult(
             True,
             status,

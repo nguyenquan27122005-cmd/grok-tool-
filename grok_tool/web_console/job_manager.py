@@ -110,6 +110,8 @@ class JobManager:
         plugin = get_plugin(tool_id)
         if plugin.meta.status == "coming_soon":
             raise RuntimeError(f"Tool '{plugin.meta.name}' chưa sẵn sàng")
+        if hasattr(plugin, "preflight"):
+            plugin.preflight(params or {}, self.root)
 
         with self._lock:
             cur = self._current_unlocked()

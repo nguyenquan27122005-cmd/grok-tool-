@@ -38,3 +38,9 @@ export const stopJob = (job_id = null) =>
   });
 export const getConfigSummary = () => api('/api/config/summary');
 export const getHealth = () => api('/api/health');
+export const getHotmails = (id) => api(`/api/tools/${id}/hotmails`);
+export const importHotmails = (id, text, mode = 'append') =>
+  api(`/api/tools/${id}/hotmails`, {
+    method: 'POST',
+    body: JSON.stringify({ text, mode }),
+  });

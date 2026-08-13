@@ -274,6 +274,51 @@ html:not(.dark-theme) .moon-icon { display: none; }
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 .field .hint { margin-top: 5px; font-size: 11px; color: var(--text-muted); }
+.field textarea {
+  min-height: 140px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hotmail-panel {
+  margin-top: 4px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(34, 158, 217, 0.28);
+  background: color-mix(in srgb, var(--primary) 6%, var(--bg-inset));
+}
+.hotmail-list-wrap { margin-top: 4px; }
+.hotmail-list {
+  list-style: none;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  padding: 4px 0;
+}
+.hotmail-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.hotmail-list li:last-child { border-bottom: 0; }
+.hm-flags { display: flex; gap: 4px; flex-shrink: 0; }
+.hotmail-plan {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--success-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
 .check-row {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; border-radius: 10px; background: var(--bg-inset);

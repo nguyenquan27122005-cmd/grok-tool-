@@ -63,6 +63,7 @@ from grokreg.mail.mail_api import (
     _extract_otp_strict,
     _otp_from_mail_payload,
 )
+from grokreg.mail import hotmail_alias as halt
 from grokreg.core.helpers import extract_otp, normalize_otp_for_input
 from grokreg.core.config import load_config
 
@@ -483,9 +484,15 @@ class HotmailProvider:
     TOKEN_URL_COMMON = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
     GRAPH_MESSAGES = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages"
 
-    def __init__(self, list_path: Path) -> None:
+    def __init__(self, list_path: Path, max_aliases: int = 5) -> None:
         self.list_path = list_path
         self.used_path = list_path.with_name(list_path.stem + "_used" + list_path.suffix)
+        self.ledger_path = halt.default_ledger_path(list_path)
+        self.max_aliases = halt.clamp_max_aliases(max_aliases)
+
+    @classmethod
+    def from_config(cls, list_path: Path, config: dict[str, Any] | None = None) -> "HotmailProvider":
+        return cls(list_path, max_aliases=halt.max_aliases_from_config(config))
 
     def _read_lines(self) -> list[str]:
         if not self.list_path.exists():
@@ -502,43 +509,128 @@ class HotmailProvider:
             encoding="utf-8",
         )
 
+    def _session_mailbox(self, session: EmailSession) -> str:
+        mb = (getattr(session, "mailbox_address", "") or "").strip()
+        if mb:
+            return mb
+        extra = getattr(session, "extra", None) or {}
+        mb = str(extra.get("mailbox") or extra.get("main_email") or "").strip()
+        return mb or halt.mailbox_from_alias(session.address)
+
+    def _line_matches_session(self, raw: str, session: EmailSession) -> bool:
+        raw_s = raw.strip()
+        if raw_s and raw_s == (session.raw_line or "").strip():
+            return True
+        parts = [p.strip() for p in raw.split("|")]
+        if not parts or not parts[0]:
+            return False
+        mailbox = self._session_mailbox(session)
+        return halt.alias_matches_mailbox(parts[0], mailbox, self.max_aliases) or (
+            parts[0].lower() == mailbox.lower()
+        )
+
+    def _build_session(
+        self,
+        raw: str,
+        *,
+        alias_index: int,
+        default_client_id: str = "",
+    ) -> EmailSession:
+        parts = [p.strip() for p in raw.split("|")]
+        mailbox = parts[0]
+        password = parts[1] if len(parts) > 1 else ""
+        refresh = parts[2] if len(parts) >= 3 else ""
+        client_id = parts[3] if len(parts) >= 4 else (default_client_id or "")
+        address = halt.make_plus_alias(mailbox, alias_index)
+        return EmailSession(
+            address=address,
+            password=password,
+            provider="hotmail",
+            refresh_token=refresh,
+            client_id=client_id,
+            raw_line=raw,
+            list_path=self.list_path,
+            mailbox=mailbox,
+            extra={
+                "mailbox": mailbox,
+                "main_email": mailbox,
+                "alias_index": alias_index,
+                "max_aliases": self.max_aliases,
+            },
+        )
+
     def mark_used(self, session: EmailSession) -> None:
         # auto mode may hold a HotmailProvider while this run used Mail.tm
         if getattr(session, "provider", "") != "hotmail":
             return
         if not self.list_path.exists():
             return
+        mailbox = self._session_mailbox(session)
+        extra = session.extra or {}
+        try:
+            idx = int(extra.get("alias_index"))
+        except (TypeError, ValueError):
+            idx = halt.alias_index_of(session.address, mailbox)
+        rec = halt.mark_index_used(
+            self.ledger_path, mailbox, idx, self.max_aliases
+        )
+        remaining = int(rec.get("remaining") or 0)
+        log.info(
+            "Hotmail alias used %s → %s  (%s/%s, còn %s slot)",
+            mailbox,
+            session.address,
+            idx + 1,
+            self.max_aliases,
+            remaining,
+        )
+        if remaining > 0:
+            return
+
         lines = self._read_lines()
-        remaining = [
-            ln
-            for ln in lines
-            if ln.strip() != session.raw_line.strip()
-            and not ln.lower().startswith(session.address.lower() + "|")
-        ]
-        self._write_lines(remaining)
+        leftover = [ln for ln in lines if not self._line_matches_session(ln, session)]
+        self._write_lines(leftover)
         line = (session.raw_line or "").strip()
+        if not line:
+            for ln in lines:
+                if self._line_matches_session(ln, session):
+                    line = ln.strip()
+                    break
         if line:
             with open(self.used_path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")
-        log.info("Hotmail marked used → %s", self.used_path.name)
+        log.info(
+            "Hotmail hết alias (%s) → chuyển %s",
+            self.max_aliases,
+            self.used_path.name,
+        )
 
     def available_count(self) -> tuple[int, int]:
-        """Return (usable_not_rate_limited, total_lines)."""
+        """Return (remaining alias slots not rate-limited, total lines)."""
+        from grokreg.browser.page_flow import is_email_rate_limited
+
         lines = self._read_lines() if self.list_path.exists() else []
-        usable = 0
+        ledger = halt.load_ledger(self.ledger_path)
+        slots = 0
         for raw in lines:
             parts = [p.strip() for p in raw.split("|")]
             if len(parts) < 2:
                 continue
-            limited, _ = is_email_rate_limited(parts[0])
-            if not limited:
-                usable += 1
-        return usable, len(lines)
+            mailbox = parts[0]
+            limited, _ = is_email_rate_limited(mailbox)
+            if limited:
+                continue
+            failed, _ = af.is_mail_in_fail_cooldown(mailbox)
+            if failed:
+                continue
+            left = halt.remaining_slots(ledger, mailbox, self.max_aliases)
+            slots += left
+        return slots, len(lines)
 
     def acquire(self, default_client_id: str = "") -> EmailSession:
         """
-        Pick first hotmail that is NOT in OTP rate-limit cooldown.
-        Reuse same account after cooldown instead of burning a new one.
+        Pick first hotmail that still has a free plus-alias and is NOT
+        in OTP rate-limit cooldown. Same mailbox is reused until
+        ``hotmail_max_aliases`` (default 5: mail / mail+1 … +4).
         """
         if not self.list_path.exists():
             raise RuntimeError(f"Hotmail list not found: {self.list_path}")
@@ -546,49 +638,50 @@ class HotmailProvider:
         if not lines:
             raise RuntimeError(f"No hotmail accounts left in {self.list_path}")
 
+        from grokreg.browser.page_flow import is_email_rate_limited
+
+        ledger = halt.load_ledger(self.ledger_path)
         skipped: list[str] = []
         for raw in lines:
             parts = [p.strip() for p in raw.split("|")]
             if len(parts) < 2:
                 log.warning("Skip invalid hotmail line: %s", raw[:60])
                 continue
-            address, password = parts[0], parts[1]
-            limited, left = is_email_rate_limited(address)
+            mailbox = parts[0]
+            idx = halt.next_free_index(ledger, mailbox, self.max_aliases)
+            if idx is None:
+                skipped.append(f"{mailbox} (hết {self.max_aliases} alias)")
+                continue
+            limited, left = is_email_rate_limited(mailbox)
             if limited:
                 mins = max(1, left // 60)
-                skipped.append(f"{address} (~{mins}m left)")
-                log.info("Skip rate-limited hotmail %s (%ss left)", address, left)
+                skipped.append(f"{mailbox} (~{mins}m left)")
+                log.info("Skip rate-limited hotmail %s (%ss left)", mailbox, left)
                 continue
-            # anti-flag: skip hotmail that failed recently (OTP/UI)
-            failed, left_f = af.is_mail_in_fail_cooldown(address)
+            failed, left_f = af.is_mail_in_fail_cooldown(mailbox)
             if failed:
-                skipped.append(f"{address} (fail-cd ~{max(1,left_f//60)}m)")
-                log.info("Skip recently-failed hotmail %s (%ss left)", address, left_f)
+                skipped.append(f"{mailbox} (fail-cd ~{max(1,left_f//60)}m)")
+                log.info("Skip recently-failed hotmail %s (%ss left)", mailbox, left_f)
                 continue
 
-            refresh = parts[2] if len(parts) >= 3 else ""
-            client_id = parts[3] if len(parts) >= 4 else (default_client_id or "")
-            session = EmailSession(
-                address=address,
-                password=password,
-                provider="hotmail",
-                refresh_token=refresh,
-                client_id=client_id,
-                raw_line=raw,
-                list_path=self.list_path,
+            session = self._build_session(
+                raw, alias_index=idx, default_client_id=default_client_id
             )
             log.info(
-                "Hotmail acquired: %s (refresh_token=%s, client_id=%s)",
-                address,
-                "yes" if refresh else "no",
-                (client_id[:12] + "...") if client_id else "default",
+                "Hotmail acquired: %s  mailbox=%s  alias %s/%s  (refresh_token=%s, client_id=%s)",
+                session.address,
+                mailbox,
+                idx + 1,
+                self.max_aliases,
+                "yes" if session.refresh_token else "no",
+                (session.client_id[:12] + "...") if session.client_id else "default",
             )
             if skipped:
-                log.info("Skipped rate-limited: %s", "; ".join(skipped[:5]))
+                log.info("Skipped: %s", "; ".join(skipped[:5]))
             return session
 
         raise RuntimeError(
-            "All hotmails are in OTP rate-limit cooldown. "
+            "No Hotmail alias left (cooldown / hết slot). "
             f"Skipped: {', '.join(skipped[:8])}. Wait or add a new line."
         )
 
@@ -750,7 +843,10 @@ class HotmailProvider:
                     return otp
                 log.warning("Graph OTP failed — IMAP OAuth2 fallback")
                 otp = self._otp_via_imap(
-                    session.address, session.password, access, max(30, timeout // 3)
+                    session.mailbox_address,
+                    session.password,
+                    access,
+                    max(30, timeout // 3),
                 )
                 if otp:
                     return otp
@@ -759,7 +855,9 @@ class HotmailProvider:
         else:
             log.info("No refresh_token — IMAP basic auth")
 
-        return self._otp_via_imap(session.address, session.password, None, timeout)
+        return self._otp_via_imap(
+            session.mailbox_address, session.password, None, timeout
+        )
 
 
 def wait_otp_smart(

@@ -1,14 +1,24 @@
-import {
-  getTools,
-  getToolStats,
-  getToolResults,
-  getCurrentJob,
-  startJob,
-  stopJob,
-  getConfigSummary,
-  getHealth,
-} from './api.js';
-import { toast } from './toast.js';
+import * as api from './api.js?v=1.5';
+import { toast } from './toast.js?v=1.5';
+
+const getTools = api.getTools;
+const getToolStats = api.getToolStats;
+const getToolResults = api.getToolResults;
+const getCurrentJob = api.getCurrentJob;
+const startJob = api.startJob;
+const stopJob = api.stopJob;
+const getConfigSummary = api.getConfigSummary;
+const getHealth = api.getHealth;
+const getHotmails =
+  typeof api.getHotmails === 'function'
+    ? api.getHotmails
+    : async () => ({ count: 0, accounts: [], slots: 0 });
+const importHotmails =
+  typeof api.importHotmails === 'function'
+    ? api.importHotmails
+    : async () => {
+        throw new Error('API Hotmail chưa sẵn sàng — restart web server');
+      };
 
 const PAGE_META = {
   '#/register': { title: 'Đăng ký', eyebrow: 'Task Console' },
@@ -26,7 +36,14 @@ const state = {
   logSeq: 0,
   pollTimer: null,
   autoScroll: true,
+  hotmailDraft: '',
+  hotmailPool: null,
 };
+
+function isHotmailMail(val) {
+  const v = String(val ?? '').trim().toLowerCase();
+  return v === '1' || v === 'hotmail' || v === 'outlook' || v === 'ms';
+}
 
 /* ── Theme / chrome ── */
 function initChrome() {
@@ -102,6 +119,146 @@ function statusTag(status, ok) {
   return `<span class="tag tag-fail">${esc(status || 'fail')}</span>`;
 }
 
+function hotmailPlanText(pool) {
+  const acc = Number(pool?.count ?? 0);
+  const slots = Number(pool?.slots ?? acc);
+  const maxA = Number(pool?.max_aliases ?? 5);
+  if (!acc) return 'Pool trống — import Hotmail rồi Start.';
+  return `Sẽ reg <strong>${slots}</strong> acc Grok từ ${acc} Hotmail (mỗi acc tối đa ${maxA} alias).`;
+}
+
+function syncHotmailUi(root) {
+  const hotmail = isHotmailMail(state.form.mail);
+  const panel = root.querySelector('#hotmail-pool');
+  const countWrap = root.querySelector('[data-field-wrap="count"]');
+  const plan = root.querySelector('#hotmail-plan');
+  if (panel) panel.hidden = !hotmail;
+  if (countWrap) countWrap.hidden = hotmail;
+  if (plan) {
+    plan.hidden = !hotmail;
+    plan.innerHTML = hotmailPlanText(state.hotmailPool);
+  }
+}
+
+function hotmailPanelHtml(pool, show) {
+  const acc = pool?.accounts || [];
+  const count = pool?.count ?? acc.length;
+  const maxA = pool?.max_aliases ?? 5;
+  const rows = acc
+    .slice(0, 40)
+    .map(
+      (a) => `<li>
+        <span class="mono">${esc(a.email)}</span>
+        <span class="hm-flags">
+          ${a.has_refresh ? '<span class="tag tag-ok">refresh</span>' : '<span class="tag tag-mid">no token</span>'}
+          ${a.has_client_id ? '<span class="tag tag-ok">cid</span>' : ''}
+        </span>
+      </li>`
+    )
+    .join('');
+  return `
+    <div class="hotmail-panel" id="hotmail-pool" ${show ? '' : 'hidden'}>
+      <div class="card-head" style="margin-bottom:10px">
+        <div>
+          <div class="card-title">Pool Hotmail</div>
+          <div class="card-sub">
+            ${count} Hotmail · Start sẽ reg ${pool?.slots ?? count} Grok (×${maxA} alias) ·
+            <span class="mono">${esc(pool?.path || 'data/hotmails.txt')}</span>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Dán Hotmail vào đây</label>
+        <textarea id="hotmail-draft" rows="7" placeholder="email|password|refresh_token|client_id
+email----password----client_id----refresh_token">${esc(state.hotmailDraft || '')}</textarea>
+        <div class="hint">1 dòng = 1 acc = 1 lượt reg. Hỗ trợ <span class="mono">|</span> hoặc <span class="mono">----</span>. Alias +1…+${Math.max(0, maxA - 1)} dùng ở lần Start sau (còn slot).</div>
+      </div>
+      <div class="btn-row" style="margin:8px 0 12px">
+        <button type="button" class="btn btn-ghost" id="btn-hotmail-browse">📂 Browse file…</button>
+        <button type="button" class="btn btn-primary" id="btn-hotmail-add">＋ Thêm vào pool</button>
+        <button type="button" class="btn btn-ghost" id="btn-hotmail-replace">Ghi đè pool</button>
+        <input type="file" id="hotmail-file" accept=".txt,.csv,.tsv,.log,.text,text/plain" hidden />
+      </div>
+      <div class="hotmail-list-wrap">
+        <div class="card-sub" style="margin-bottom:6px">Đang trong pool</div>
+        ${
+          acc.length
+            ? `<ul class="hotmail-list">${rows}${
+                acc.length > 40 ? `<li class="card-sub">… +${acc.length - 40} acc nữa</li>` : ''
+              }</ul>`
+            : `<div class="empty" style="padding:16px">Pool trống — dán list hoặc Browse từ Explorer.</div>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+function bindHotmailPanel(root, toolId) {
+  const panel = root.querySelector('#hotmail-pool');
+  const draft = root.querySelector('#hotmail-draft');
+  const fileEl = root.querySelector('#hotmail-file');
+  if (!panel) return;
+
+  const syncDraft = () => {
+    if (draft) state.hotmailDraft = draft.value;
+  };
+  draft?.addEventListener('input', syncDraft);
+
+  const applyPool = (pool) => {
+    state.hotmailPool = pool;
+    const next = hotmailPanelHtml(pool, true);
+    panel.insertAdjacentHTML('afterend', next);
+    panel.remove();
+    bindHotmailPanel(root, toolId);
+    const mailSel = root.querySelector('[data-key="mail"]');
+    if (mailSel) state.form.mail = mailSel.value;
+    syncHotmailUi(root);
+  };
+
+  const send = async (mode) => {
+    syncDraft();
+    const text = (state.hotmailDraft || '').trim();
+    if (!text) {
+      toast('Dán Hotmail hoặc Browse file trước', 'err');
+      return;
+    }
+    if (mode === 'replace' && !confirm('Ghi đè toàn bộ data/hotmails.txt?')) return;
+    try {
+      const res = await importHotmails(toolId, text, mode);
+      state.hotmailDraft = '';
+      const added = res.added ?? 0;
+      const skipped = res.skipped ?? 0;
+      const invalid = res.invalid ?? 0;
+      toast(
+        mode === 'replace'
+          ? `Đã ghi đè ${res.count ?? 0} acc`
+          : `Thêm ${added} · bỏ trùng ${skipped}${invalid ? ` · lỗi ${invalid}` : ''}`,
+        invalid && !added ? 'err' : 'ok'
+      );
+      applyPool(res);
+    } catch (err) {
+      toast(err.message || String(err), 'err');
+    }
+  };
+
+  root.querySelector('#btn-hotmail-browse')?.addEventListener('click', () => fileEl?.click());
+  fileEl?.addEventListener('change', async () => {
+    const file = fileEl.files && fileEl.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      state.hotmailDraft = text;
+      if (draft) draft.value = text;
+      toast(`Đã đọc ${file.name} (${text.split(/\r?\n/).filter((l) => l.trim()).length} dòng)`, 'ok');
+    } catch (err) {
+      toast(err.message || 'Không đọc được file', 'err');
+    }
+    fileEl.value = '';
+  });
+  root.querySelector('#btn-hotmail-add')?.addEventListener('click', () => send('append'));
+  root.querySelector('#btn-hotmail-replace')?.addEventListener('click', () => send('replace'));
+}
+
 /* ── Pages ── */
 async function renderRegister(root) {
   if (!state.tools.length) {
@@ -124,6 +281,13 @@ async function renderRegister(root) {
   try {
     if (tool.status === 'ready') stats = await getToolStats(tool.id);
   } catch (_) {}
+  if (tool.id === 'grok') {
+    try {
+      state.hotmailPool = await getHotmails(tool.id);
+    } catch (_) {
+      state.hotmailPool = state.hotmailPool || { count: 0, accounts: [] };
+    }
+  }
 
   const job = state.job;
   const running = job && ['running', 'pending', 'stopping'].includes(job.status);
@@ -182,7 +346,7 @@ async function renderRegister(root) {
             ${(tool.fields || [])
               .map((f) => {
                 if (f.type === 'select') {
-                  return `<div class="field">
+                  return `<div class="field" data-field-wrap="${esc(f.key)}">
                     <label>${esc(f.label)}</label>
                     <select data-key="${esc(f.key)}">
                       ${(f.options || [])
@@ -197,13 +361,13 @@ async function renderRegister(root) {
                 }
                 if (f.type === 'checkbox') {
                   const checked = state.form[f.key] === true || state.form[f.key] === 'true' || state.form[f.key] === 1;
-                  return `<div class="check-row">
+                  return `<div class="check-row" data-field-wrap="${esc(f.key)}">
                     <input type="checkbox" data-key="${esc(f.key)}" id="f-${esc(f.key)}" ${checked ? 'checked' : ''} />
                     <label for="f-${esc(f.key)}" style="margin:0;color:var(--text-primary)">${esc(f.label)}</label>
                   </div>
                   ${f.hint ? `<div class="hint" style="margin-top:-6px">${esc(f.hint)}</div>` : ''}`;
                 }
-                return `<div class="field">
+                return `<div class="field" data-field-wrap="${esc(f.key)}" ${f.key === 'count' && isHotmailMail(state.form.mail) ? 'hidden' : ''}>
                   <label>${esc(f.label)}</label>
                   <input type="${f.type === 'number' ? 'number' : 'text'}" data-key="${esc(f.key)}"
                     value="${esc(state.form[f.key] ?? f.default)}"
@@ -213,6 +377,13 @@ async function renderRegister(root) {
               })
               .join('')}
           </div>
+
+          ${tool.id === 'grok' ? hotmailPanelHtml(state.hotmailPool, isHotmailMail(state.form.mail)) : ''}
+          ${
+            tool.id === 'grok'
+              ? `<div class="hotmail-plan" id="hotmail-plan" ${isHotmailMail(state.form.mail) ? '' : 'hidden'}>${hotmailPlanText(state.hotmailPool)}</div>`
+              : ''
+          }
 
           <div class="btn-row">
             <button class="btn btn-primary" id="btn-start" ${running || tool.status !== 'ready' ? 'disabled' : ''}>
@@ -259,10 +430,13 @@ async function renderRegister(root) {
       if (el.type === 'checkbox') state.form[key] = el.checked;
       else if (el.type === 'number') state.form[key] = el.value === '' ? 0 : Number(el.value);
       else state.form[key] = el.value;
+      if (key === 'mail') syncHotmailUi(root);
     };
     el.addEventListener('change', sync);
     el.addEventListener('input', sync);
   });
+  bindHotmailPanel(root, tool.id);
+  syncHotmailUi(root);
 
   document.getElementById('auto-scroll')?.addEventListener('change', (e) => {
     state.autoScroll = e.target.checked;
@@ -277,6 +451,18 @@ async function renderRegister(root) {
         else if (el.type === 'number') state.form[key] = Number(el.value);
         else state.form[key] = el.value;
       });
+      if (isHotmailMail(state.form.mail)) {
+        try {
+          state.hotmailPool = await getHotmails(state.selectedTool);
+        } catch (_) {}
+        const n = Number(state.hotmailPool?.slots || state.hotmailPool?.count || 0);
+        if (!n) {
+          toast('Pool Hotmail trống / hết slot — import acc rồi Start', 'err');
+          return;
+        }
+        state.form.count = n;
+        syncHotmailUi(root);
+      }
       const res = await startJob(state.selectedTool, { ...state.form });
       state.job = res.job;
       state.logSeq = 0;

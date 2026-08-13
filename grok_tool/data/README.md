@@ -5,7 +5,9 @@ This folder holds **runtime secrets and personal results**. It is gitignored.
 Examples (never commit):
 
 - `accounts.txt` — registered emails / passwords / status  
-- `hotmails.txt` — mail pool  
+- `hotmails.txt` — mail pool (1 dòng = tối đa `hotmail_max_aliases` Grok)  
+- `hotmail_aliases.json` — ledger plus-alias đã dùng (`user+1@` …)  
+
 - `delivery_queue.json` — SSO retry queue  
 - `*.log`, network captures, counters  
 

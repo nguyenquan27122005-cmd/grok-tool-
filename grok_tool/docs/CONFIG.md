@@ -11,6 +11,7 @@ Mọi giá trị dưới đây là **tên key + ý nghĩa**. Đừng paste secre
 | `email_provider` | `auto_temp` | CLI/web ghi đè mỗi lần chạy |
 | `temp_mail_order` | `["azpopmail","tmail_wibu"]` | Thứ tự failover temp smart |
 | `hotmail_list` | `data/hotmails.txt` | Pool Hotmail (local) |
+| `hotmail_max_aliases` | `5` | 1 Hotmail → tối đa N Grok (`mail`, `mail+1@` … `+4`). OTP vẫn về inbox gốc |
 | `timeout_otp` | `240` | Giây chờ OTP |
 | `azpopmail.*` | URL public | Token để trống nếu không có |
 | `tmail_wibu.*` | URL public | Temp provider thứ hai |

@@ -60,6 +60,7 @@ def load_config() -> dict[str, Any]:
     # hotmail | azpopmail (temp) | mailtm | auto
     cfg.setdefault("email_provider", "hotmail")
     cfg.setdefault("hotmail_list", "data/hotmails.txt")
+    cfg.setdefault("hotmail_max_aliases", 5)
     # https://azpopmail.com/document — temp mail REST API
     cfg.setdefault(
         "azpopmail",
