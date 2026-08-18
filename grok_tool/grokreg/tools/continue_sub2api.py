@@ -172,6 +172,18 @@ async def main() -> int:
             if not done:
                 out.append(f"{email}|{password}|added_sub2api:{s2.name}")
             acc_path.write_text("\n".join(out) + "\n", encoding="utf-8")
+            try:
+                from grokreg.core.helpers import remember_account_time
+
+                remember_account_time(email)
+            except Exception:
+                pass
+            try:
+                from grokreg.reg.flow import push_results_to_gsheet
+
+                push_results_to_gsheet(config, email)
+            except Exception as e:
+                log.error("Google Sheet push failed after continue_sub2api %s: %s", email, e)
             return 0
 
         log.error("FAIL stage=%s msg=%s", s2.stage, s2.message)

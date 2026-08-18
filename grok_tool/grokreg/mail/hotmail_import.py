@@ -4,14 +4,25 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMAIL_RE = re.compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$")
+_EMAIL_FIND_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _GUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
+_PREFIX_RE = re.compile(r"^(?:[-*•]|\d+[.)\]])\s*")
+
+
+def _clean_cell(value: str) -> str:
+    s = (value or "").strip().strip("\"'“”‘’`").strip()
+    if s.lower().startswith("mailto:"):
+        s = s[7:].strip()
+    if s.startswith("<") and s.endswith(">"):
+        s = s[1:-1].strip()
+    return s
 
 
 def is_email(value: str) -> bool:
-    return bool(_EMAIL_RE.match((value or "").strip()))
+    return bool(_EMAIL_RE.match(_clean_cell(value)))
 
 
 def is_guid(value: str) -> bool:
@@ -24,15 +35,35 @@ def split_line(line: str) -> list[str]:
         return []
     if raw.startswith("\ufeff"):
         raw = raw.lstrip("\ufeff").strip()
+    raw = _PREFIX_RE.sub("", raw).strip()
     if "----" in raw:
-        return [p.strip() for p in raw.split("----")]
-    if "|" in raw:
-        return [p.strip() for p in raw.split("|")]
-    if "\t" in raw:
-        return [p.strip() for p in raw.split("\t")]
-    if "," in raw and "@" in raw.split(",", 1)[0]:
-        return [p.strip() for p in raw.split(",")]
-    return [raw]
+        parts = [p.strip() for p in raw.split("----")]
+    elif "|" in raw:
+        parts = [p.strip() for p in raw.split("|")]
+    elif "\t" in raw:
+        parts = [p.strip() for p in raw.split("\t")]
+    elif ";" in raw and "@" in raw.split(";", 1)[0]:
+        parts = [p.strip() for p in raw.split(";", 3)]
+    elif raw.count(":") >= 1 and is_email(raw.split(":", 1)[0]):
+        parts = [p.strip() for p in raw.split(":", 3)]
+    elif "," in raw and is_email(raw.split(",", 1)[0].strip().strip("\"'")):
+        parts = [p.strip() for p in raw.split(",")]
+    elif " / " in raw and is_email(raw.split(" / ", 1)[0]):
+        parts = [p.strip() for p in raw.split(" / ")]
+    elif re.search(r"\s{2,}", raw) and is_email(re.split(r"\s{2,}", raw, maxsplit=1)[0]):
+        parts = [p.strip() for p in re.split(r"\s{2,}", raw)]
+    elif " " in raw and is_email(raw.split(" ", 1)[0]):
+        head, tail = raw.split(" ", 1)
+        parts = [head, tail.strip()]
+    else:
+        found = _EMAIL_FIND_RE.search(raw)
+        if found and not is_email(raw):
+            email = found.group(0)
+            rest = (raw[: found.start()] + " " + raw[found.end() :]).strip()
+            parts = [email] + ([rest] if rest else [])
+        else:
+            parts = [raw]
+    return [_clean_cell(p) for p in parts if _clean_cell(p) or p == parts[0]]
 
 
 def _looks_token(value: str) -> bool:
@@ -46,9 +77,11 @@ def normalize_parts(parts: list[str]) -> dict[str, str] | None:
       email|password|refresh|client_id     (grok_tool)
       email|password|refresh
       email|password
+      email:password[:refresh[:client_id]]
+      email;password;...
       email----password----client_id----refresh   (register-web)
     """
-    parts = [str(p or "").strip() for p in parts]
+    parts = [_clean_cell(p) for p in parts]
     while parts and parts[-1] == "":
         parts.pop()
     if len(parts) < 1 or not is_email(parts[0]):

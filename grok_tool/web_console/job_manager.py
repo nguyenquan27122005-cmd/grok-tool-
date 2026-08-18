@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Deque, Optional
 
+from grokreg.core import winhide
+
 from .plugins import get_plugin
 from .plugins.base import BaseToolPlugin
 
@@ -195,11 +197,8 @@ class JobManager:
             except Exception:
                 pass
 
+            cmd = winhide.rewrite_python_cmd(cmd)
             job.append_log("CMD: " + " ".join(cmd))
-            creationflags = 0
-            if os.name == "nt":
-                creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(cwd),
@@ -210,7 +209,7 @@ class JobManager:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                creationflags=creationflags,
+                **winhide.kwargs(new_group=True),
             )
             job.proc = proc
 

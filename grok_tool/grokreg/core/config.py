@@ -213,6 +213,9 @@ def load_config() -> dict[str, Any]:
     _s2.setdefault("durable_retry", True)
     _s2.setdefault("durable_interval_sec", 60)
     _s2.setdefault("run_test", False)
+    _s2.setdefault("name_include_email", False)
+    _s2.setdefault("refresh_usage_after_import", True)
+    _s2.setdefault("usage_refresh_sec", 20)
     # External mail reader (dongvanfb by default) — primary OTP source for hotmail
     cfg.setdefault(
         "mail_api",

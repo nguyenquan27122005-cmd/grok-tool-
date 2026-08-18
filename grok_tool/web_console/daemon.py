@@ -64,7 +64,7 @@ def run_loop(host: str, port: int) -> None:
     os.environ["WEB_HOST"] = host
     os.environ["WEB_PORT"] = str(port)
 
-    py = str(_py_console())  # need console python for uvicorn reliability
+    py = str(_py())  # pythonw: no console flash on spawn/restart
     backoff = 2
     _log(f"daemon start host={host} port={port} py={py}")
 
@@ -87,12 +87,18 @@ def run_loop(host: str, port: int) -> None:
             with open(LOG_FILE, "a", encoding="utf-8") as logf:
                 logf.write(f"\n--- uvicorn {time.strftime('%H:%M:%S')} ---\n")
                 logf.flush()
+                hide = {}
+                if os.name == "nt":
+                    from grokreg.core import winhide
+
+                    hide = winhide.kwargs(new_group=True)
                 proc = subprocess.Popen(
                     cmd,
                     cwd=str(ROOT),
                     env=os.environ.copy(),
                     stdout=logf,
                     stderr=subprocess.STDOUT,
+                    **hide,
                 )
                 code = proc.wait()
             _log(f"uvicorn exit={code}")
@@ -149,6 +155,8 @@ def install_autostart(host: str, port: int) -> int:
             "$s.Save(); "
             "Write-Output 'shortcut_ok'"
         )
+        from grokreg.core import winhide
+
         r = subprocess.run(
             [
                 "powershell",
@@ -161,6 +169,7 @@ def install_autostart(host: str, port: int) -> int:
             capture_output=True,
             text=True,
             errors="replace",
+            **winhide.kwargs(),
         )
         if "shortcut_ok" not in (r.stdout or ""):
             print("shortcut warn:", (r.stdout or "")[:200], (r.stderr or "")[:200])
@@ -171,7 +180,13 @@ def install_autostart(host: str, port: int) -> int:
 
     # 2) Try Task Scheduler (may need admin — optional)
     tr = f'"{runner}" -m web_console.daemon --loop --host {host} --port {port}'
-    subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"], capture_output=True)
+    from grokreg.core import winhide
+
+    subprocess.run(
+        ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
+        capture_output=True,
+        **winhide.kwargs(),
+    )
     r = subprocess.run(
         [
             "schtasks",
@@ -189,10 +204,15 @@ def install_autostart(host: str, port: int) -> int:
         capture_output=True,
         text=True,
         errors="replace",
+        **winhide.kwargs(),
     )
     if r.returncode == 0:
         print(f"Task Scheduler OK: {TASK_NAME}")
-        subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True)
+        subprocess.run(
+            ["schtasks", "/Run", "/TN", TASK_NAME],
+            capture_output=True,
+            **winhide.kwargs(),
+        )
     else:
         print("Task Scheduler skipped (no admin) — using Startup folder only")
 
@@ -262,9 +282,12 @@ def uninstall_autostart() -> int:
     if os.name != "nt":
         print("uninstall only on Windows")
         return 1
+    from grokreg.core import winhide
+
     subprocess.run(
         ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
         capture_output=True,
+        **winhide.kwargs(),
     )
     try:
         lnk = _startup_lnk()
@@ -290,11 +313,14 @@ def status() -> int:
         print("HTTP DOWN:", e)
 
     if os.name == "nt":
+        from grokreg.core import winhide
+
         r = subprocess.run(
             ["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "LIST"],
             capture_output=True,
             text=True,
             errors="replace",
+            **winhide.kwargs(),
         )
         if r.returncode == 0:
             print("--- Task Scheduler ---")

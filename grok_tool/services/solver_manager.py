@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from grokreg.core import winhide
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SOLVER_PORT = 5072
@@ -43,6 +45,25 @@ def _services_dir() -> str:
 
 def _solver_start_script() -> str:
     return os.path.join(_services_dir(), 'turnstile_solver', 'start.py')
+
+
+def settings_from_config(config: dict | None = None) -> dict[str, Any]:
+    """Flatten nested ``turnstile`` config into the keys this module expects."""
+    cfg = dict(config or {})
+    ts = cfg.get('turnstile') if isinstance(cfg.get('turnstile'), dict) else {}
+    out = dict(cfg)
+    out['turnstile_provider'] = str(
+        cfg.get('turnstile_provider') or ts.get('mode') or 'auto'
+    ).strip().lower() or 'auto'
+    out['turnstile_solver_url'] = str(
+        cfg.get('turnstile_solver_url') or ts.get('solver_url') or DEFAULT_SOLVER_URL
+    ).strip() or DEFAULT_SOLVER_URL
+    out['yescaptcha_key'] = str(
+        cfg.get('yescaptcha_key') or ts.get('yescaptcha_key') or ''
+    ).strip()
+    if not str(out.get('browser_proxy') or '').strip():
+        out['browser_proxy'] = str(ts.get('proxy') or cfg.get('proxy') or '').strip()
+    return out
 
 
 def parse_solver_endpoint(url: str | None) -> dict[str, Any]:
@@ -88,7 +109,7 @@ def parse_solver_endpoint(url: str | None) -> dict[str, Any]:
 
 def should_auto_start(settings: dict | None = None) -> bool:
     """Return True when boot should try to launch the local solver."""
-    settings = settings or {}
+    settings = settings_from_config(settings)
     mode = str(settings.get('turnstile_provider', '') or 'auto').strip().lower() or 'auto'
     if mode in {'browser', 'none', 'off', 'disabled'}:
         return False
@@ -107,7 +128,7 @@ def should_auto_start(settings: dict | None = None) -> bool:
 def configure_from_settings(settings: dict | None = None) -> dict[str, Any]:
     """Update the managed endpoint from settings (port / URL)."""
     global _managed_port, _managed_url
-    settings = settings or {}
+    settings = settings_from_config(settings)
     endpoint = parse_solver_endpoint(settings.get('turnstile_solver_url'))
     if endpoint['manageable']:
         _managed_port = int(endpoint['port'])
@@ -191,7 +212,7 @@ def _build_cmd(port: int, *, browser_type: str, thread: int, proxy: bool) -> lis
     if not os.path.isfile(script):
         raise FileNotFoundError(f'solver start script missing: {script}')
     cmd = [
-        sys.executable,
+        str(winhide.hidden_python()),
         script,
         '--browser_type', browser_type,
         '--thread', str(max(1, int(thread))),
@@ -215,7 +236,7 @@ def start(
     global _proc, _consecutive_failures, _last_failure_reason, _owned_by_us
     global _managed_port, _managed_url
 
-    settings = settings or {}
+    settings = settings_from_config(settings)
     endpoint = configure_from_settings(settings)
     if not endpoint['manageable'] and not force:
         reason = (
@@ -294,13 +315,17 @@ def start(
                     '127.0.0.1', 'localhost', '::1',
                 ])),
             }
-            _proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                env=child_env,
-                cwd=os.path.dirname(_solver_start_script()),
-            )
+            popen_kw: dict[str, Any] = {
+                'stdout': subprocess.DEVNULL,
+                'stderr': subprocess.PIPE,
+                'env': child_env,
+                'cwd': os.path.dirname(_solver_start_script()),
+            }
+            if os.name == 'nt':
+                popen_kw.update(winhide.kwargs(new_group=True))
+            else:
+                popen_kw['start_new_session'] = True
+            _proc = subprocess.Popen(cmd, **popen_kw)
             _owned_by_us = True
         except Exception as exc:
             _consecutive_failures += 1
@@ -402,9 +427,30 @@ def restart(settings: dict | None = None, **kwargs) -> dict[str, Any]:
     return start(settings, force=True, **kwargs)
 
 
+def ensure_started(settings: dict | None = None, **kwargs) -> dict[str, Any]:
+    """Start the local solver if offline (unless YesCaptcha is configured).
+
+    Protocol / auto backends call this so HTTP signup does not depend on
+    a separately launched CHAY_SOLVER.bat window.
+    """
+    settings = settings_from_config(settings)
+    if str(settings.get('yescaptcha_key') or '').strip():
+        return {
+            'running': True,
+            'online': True,
+            'provider': 'yescaptcha',
+            'url': settings.get('turnstile_solver_url') or _managed_url,
+        }
+    status = get_status(settings.get('turnstile_solver_url'))
+    if status.get('online'):
+        return status
+    logger.info('[Solver] offline — auto-starting local Camoufox solver')
+    return start(settings, **kwargs)
+
+
 def start_async(settings: dict | None = None, **kwargs) -> None:
     """Fire-and-forget start so app boot is not blocked for 30s+."""
-    snapshot = dict(settings or {})
+    snapshot = settings_from_config(settings)
 
     def _run():
         try:
@@ -422,6 +468,7 @@ def _kill_by_port(port: int) -> None:
         if platform.system() == 'Windows':
             out = subprocess.check_output(
                 ['netstat', '-ano', '-p', 'TCP'], text=True, timeout=5,
+                **winhide.kwargs(),
             )
             for line in out.splitlines():
                 if f':{port}' in line and 'LISTENING' in line:
@@ -436,6 +483,7 @@ def _kill_by_port(port: int) -> None:
                                 capture_output=True,
                                 timeout=5,
                                 check=False,
+                                **winhide.kwargs(),
                             )
         else:
             out = subprocess.check_output(

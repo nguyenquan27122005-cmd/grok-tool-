@@ -64,7 +64,7 @@ from grokreg.mail.mail_api import (
     _otp_from_mail_payload,
 )
 from grokreg.mail import hotmail_alias as halt
-from grokreg.core.helpers import extract_otp, normalize_otp_for_input
+from grokreg.core.helpers import extract_otp, normalize_otp_for_input, random_string
 from grokreg.core.config import load_config
 
 class MailTmProvider:
@@ -361,9 +361,8 @@ class AzpopMailProvider:
         while time.time() < deadline:
             poll_i += 1
             try:
-                # Every 3rd poll: full list (no update stamp) — avoids missing mail
-                use_update = server_time if (poll_i % 3) else None
-                msgs, st = self._list_messages(username, domain, update=use_update)
+                # Always full list. Incremental `update=` can skip the xAI mail.
+                msgs, st = self._list_messages(username, domain, update=None)
                 if st:
                     server_time = st
                 # newest first when API returns chronological list
@@ -408,12 +407,25 @@ class AzpopMailProvider:
                     seen.add(mid)
                     subject = str(m.get("subject") or "")
                     frm = str(m.get("from") or m.get("sender") or "")
+                    # Subject often has "confirmation code: 754-480" — don't wait on body.
+                    otp = extract_otp(subject) or extract_otp(f"{subject} {frm}")
+                    if otp:
+                        elapsed = time.time() - t0
+                        log.info(
+                            "OTP found (AzpopMail subject): display=%s input=%s id=%s (%.1fs)",
+                            otp,
+                            normalize_otp_for_input(otp),
+                            mid,
+                            elapsed,
+                        )
+                        slog.api_ok(f"OTP Azpop: {otp}")
+                        af.mark_domain_otp(domain, ok=True, elapsed=elapsed)
+                        return otp
                     body = ""
                     try:
                         body = self._message_body(username, domain, mid)
                     except Exception as e:
                         log.warning("AzpopMail body id=%s: %s", mid, e)
-                    # Also extract from subject alone (code often in subject)
                     blob = f"{subject} {frm} {body}"
                     blob_plain = _clean_mail_text(blob)
                     log.info(
@@ -434,15 +446,13 @@ class AzpopMailProvider:
                     # Always try extract; accept dashed codes even if filter weak
                     otp = extract_otp(blob_plain) or extract_otp(blob)
                     if otp and not (is_xai or looks_code):
-                        # strong form YI2-BKR alone is enough if from-ish xAI domain
-                        if not re.fullmatch(r"[A-Z0-9]{2,5}-[A-Z0-9]{2,5}", otp):
-                            log.debug(
-                                "AzpopMail skip non-xAI mail id=%s subj=%s otp_candidate=%s",
-                                mid,
-                                subject[:60],
-                                otp,
-                            )
-                            continue
+                        log.debug(
+                            "AzpopMail skip non-xAI mail id=%s subj=%s otp_candidate=%s",
+                            mid,
+                            subject[:60],
+                            otp,
+                        )
+                        continue
                     if otp:
                         elapsed = time.time() - t0
                         log.info(
@@ -585,7 +595,21 @@ class HotmailProvider:
         )
         if remaining > 0:
             return
+        self._retire_mailbox(session)
 
+    def skip_mailbox(self, session: EmailSession, reason: str = "") -> None:
+        """Bỏ cả Hotmail (hết +1…+N) — OTP không về / inbox chết."""
+        if getattr(session, "provider", "") != "hotmail":
+            return
+        if not self.list_path.exists():
+            return
+        mailbox = self._session_mailbox(session)
+        for i in range(self.max_aliases):
+            halt.mark_index_used(self.ledger_path, mailbox, i, self.max_aliases)
+        log.info("Hotmail skip cả mailbox %s (%s)", mailbox, reason or "otp_timeout")
+        self._retire_mailbox(session)
+
+    def _retire_mailbox(self, session: EmailSession) -> None:
         lines = self._read_lines()
         leftover = [ln for ln in lines if not self._line_matches_session(ln, session)]
         self._write_lines(leftover)

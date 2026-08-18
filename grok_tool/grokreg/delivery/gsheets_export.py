@@ -168,14 +168,19 @@ def _all_full_from_accounts() -> list[dict]:
         out: list[dict] = []
         for r in by_email.values():
             tag = emr.classify(r.get("status", ""))
-            if tag in ("full_ok", "reg_ok"):
+            # Sheet tab = acc đã đẩy Sub2API (added_sub2api*), không lấy reg-only.
+            if tag == "full_ok":
                 out.append(r)
         # stable-ish order: keep accounts.txt appearance order of last write
         order = []
         seen = set()
         for r in reversed(rows):
             em = str(r.get("email") or "").strip().lower()
-            if em in by_email and em not in seen and emr.classify(by_email[em].get("status", "")) in ("full_ok", "reg_ok"):
+            if (
+                em in by_email
+                and em not in seen
+                and emr.classify(by_email[em].get("status", "")) == "full_ok"
+            ):
                 order.append(by_email[em])
                 seen.add(em)
         order.reverse()
@@ -233,6 +238,7 @@ def build_payload(data: dict[str, Any] | None = None) -> dict[str, Any]:
         vpn_cell = vpn_meta.get(em) or (
             vpn.get("label") if em in session_emails else ""
         ) or (vpn.get("label") if not session_emails else "")
+        when = str(r.get("ts") or "").strip()
         accounts_rows.append(
             [
                 n,
@@ -241,8 +247,8 @@ def build_payload(data: dict[str, Any] | None = None) -> dict[str, Any]:
                 r.get("password", ""),
                 sub2api_name(r.get("status", "")),
                 r.get("status", ""),
-                ref.strftime("%Y-%m-%d"),
-                ref.strftime("%Y-%m-%d %H:%M:%S"),
+                when[:10] if when else "",
+                when or "—",
                 vpn_cell or "—",
             ]
         )
@@ -264,9 +270,9 @@ def build_payload(data: dict[str, Any] | None = None) -> dict[str, Any]:
         "alltime_ok": data.get("alltime_ok", 0),
         "alltime_fail": data.get("alltime_fail", 0),
         "batch_label": batch_label,
-        "acc_full": data.get("full_n", 0),
-        "acc_fail": data.get("fail_n", 0),
-        "acc_ok": data.get("ok_n", 0),
+        "acc_full": data.get("full_n") if batch_label else "",
+        "acc_fail": data.get("fail_n") if batch_label else "",
+        "acc_ok": data.get("ok_n") if batch_label else "",
         "total_unique": data.get("total", 0),
         "ok_rate": round(float(data.get("rate", 0.0) or 0.0), 1),
         "starts": data.get("starts", 0),
@@ -312,6 +318,7 @@ def push_via_webapp(gs: dict[str, Any], payload: dict[str, Any]) -> str:
     payload["spreadsheet_id"] = gs.get("spreadsheet_id") or DEFAULT_SHEET_ID
     payload["gid"] = int(gs.get("gid") or DEFAULT_GID)
     payload["mode"] = gs.get("mode") or "replace_night"
+    payload["tab"] = str(payload.get("tab") or gs.get("tab") or "grok").strip() or "grok"
 
     # follow redirects (Apps Script often 302)
     r = requests.post(url, json=payload, timeout=90, allow_redirects=True)
@@ -485,12 +492,60 @@ def push_via_service_account(gs: dict[str, Any], payload: dict[str, Any]) -> str
     return f"gspread ok → {url} (FULL={len(full)} FAIL={len(fail_rows)})"
 
 
+def lookup_account_row(email: str) -> dict[str, str]:
+    em = (email or "").strip().lower()
+    out = {"email": email, "password": "", "status": "", "ts": "", "name": ""}
+    if not em:
+        return out
+    acc = ROOT / "data" / "accounts.txt"
+    if acc.exists():
+        for ln in acc.read_text(encoding="utf-8", errors="ignore").splitlines():
+            parts = [p.strip() for p in ln.split("|")]
+            if len(parts) >= 3 and parts[0].lower() == em:
+                out["email"] = parts[0]
+                out["password"] = parts[1]
+                out["status"] = "|".join(parts[2:])
+    out["name"] = sub2api_name(out["status"]) or out["status"]
+    times = ROOT / "data" / "account_times.json"
+    if times.exists():
+        try:
+            raw = json.loads(times.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                out["ts"] = str(raw.get(em) or "")
+        except Exception:
+            pass
+    if not out["ts"]:
+        out["ts"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return out
+
+
+def append_one_to_sheet(email: str, tab: str = "grok") -> str:
+    gs = load_gs_config()
+    if not gs.get("enabled", True):
+        return "google_sheets disabled in config"
+    row = lookup_account_row(email)
+    payload = {
+        "action": "append",
+        "tab": tab or "grok",
+        "account": {
+            "email": row["email"] or email,
+            "password": row["password"],
+            "name": row["name"],
+            "status": row["status"],
+            "time": row["ts"],
+            "vpn": "—",
+        },
+    }
+    return push_via_webapp(gs, payload)
+
+
 def export_to_google_sheets(data: dict[str, Any]) -> str:
     gs = load_gs_config()
     if not gs.get("enabled", True):
         return "google_sheets disabled in config"
 
     payload = build_payload(data)
+    payload["tab"] = str(gs.get("tab") or "grok").strip() or "grok"
     # always dump last payload for debug / one-shot regen
     try:
         (ROOT / "data" / "gsheet_last_payload.json").write_text(

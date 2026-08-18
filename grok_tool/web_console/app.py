@@ -50,6 +50,17 @@ class HotmailImportBody(BaseModel):
     mode: str = "append"  # append | replace
 
 
+def resolve_brand_icon(tool_id: str, explicit: str = "") -> str:
+    """Official publisher icon. Drop brands/{id}.svg|png|webp — future tools inherit."""
+    if explicit:
+        return str(explicit)
+    brands = STATIC / "img" / "brands"
+    for ext in (".svg", ".png", ".webp"):
+        if (brands / f"{tool_id}{ext}").is_file():
+            return f"/static/img/brands/{tool_id}{ext}"
+    return ""
+
+
 def _tool_public(p) -> dict[str, Any]:
     m = p.meta
     return {
@@ -57,6 +68,7 @@ def _tool_public(p) -> dict[str, Any]:
         "name": m.name,
         "description": m.description,
         "icon": m.icon,
+        "brand_icon": resolve_brand_icon(m.id, getattr(m, "brand_icon", "") or ""),
         "status": m.status,
         "color": m.color,
         "fields": [

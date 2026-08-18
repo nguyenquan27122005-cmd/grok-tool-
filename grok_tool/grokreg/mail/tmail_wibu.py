@@ -28,21 +28,15 @@ log = logging.getLogger("grok-reg")
 DEFAULT_BASE = "https://tmail.wibucrypto.pro"
 
 _XAI_HINTS = (
-    "x.ai",
-    "xai",
-    "grok",
-    "spacexai",
-    "accounts.x.ai",
     "noreply@x.ai",
     "no-reply@x.ai",
+    "accounts.x.ai",
     "verify your email",
     "verification code",
     "security code",
     "your code is",
     "confirmation code",
     "your xai",
-    "one time",
-    "one-time",
 )
 
 
@@ -539,7 +533,7 @@ class TmailWibuProvider:
                     if mid and mid in seen and not msg.get("body"):
                         continue
                     blob = self._msg_blob(msg)
-                    otp = self._try_extract(blob, looks_required=False)
+                    otp = self._try_extract(blob, looks_required=True)
                     if otp:
                         log.info(
                             "OTP found (TmailWibu): display=%s input=%s id=%s (%.1fs)",
@@ -554,7 +548,7 @@ class TmailWibuProvider:
                     if mid and re.fullmatch(r"\d+", mid):
                         body_html = self._open_message(address, extra, mid)
                         if body_html:
-                            otp = self._try_extract(body_html, looks_required=False)
+                            otp = self._try_extract(body_html, looks_required=True)
                             if otp:
                                 log.info(
                                     "OTP found (TmailWibu open): display=%s input=%s id=%s (%.1fs)",
@@ -572,7 +566,7 @@ class TmailWibuProvider:
                 for blob in (html_blob, page_html):
                     if not blob or "Empty Inbox" in blob:
                         continue
-                    otp = self._try_extract(blob, looks_required=False)
+                    otp = self._try_extract(blob, looks_required=True)
                     if otp:
                         log.info(
                             "OTP found (TmailWibu HTML): display=%s input=%s (%.1fs)",
@@ -661,6 +655,13 @@ class TmailWibuProvider:
         otp = extract_otp_from_text(plain) or extract_otp_from_text(blob)
         if not otp:
             return None
+        try:
+            from grokreg.core.helpers import is_plausible_xai_otp
+
+            if not is_plausible_xai_otp(otp):
+                return None
+        except Exception:
+            pass
         if looks_required:
             looks = _is_xai_blob(plain) or bool(
                 re.search(r"verif|confirm|code|x\.ai|grok|noreply", plain, re.I)
@@ -725,9 +726,11 @@ class TmailWibuProvider:
         m = re.search(r"const email = '([^']+)'", text)
         if m:
             page_email = m.group(1).strip()
-        if "Empty Inbox" in text and "x.ai" not in text.lower():
+        if "Empty Inbox" in text and "noreply@x.ai" not in text.lower():
             return None, text, page_email
-        otp = self._try_extract(text, looks_required=False)
+        otp = None
+        if _is_xai_blob(text):
+            otp = self._try_extract(text, looks_required=True)
         return otp, text, page_email
 
     def _open_message(

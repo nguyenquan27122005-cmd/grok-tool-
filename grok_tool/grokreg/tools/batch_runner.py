@@ -83,10 +83,13 @@ def main() -> int:
     try:
         import subprocess
 
+        from grokreg.core import winhide
+
         subprocess.run(
             ["powercfg", "/change", "standby-timeout-ac", "0"],
             capture_output=True,
             timeout=5,
+            **winhide.kwargs(),
         )
     except Exception:
         pass

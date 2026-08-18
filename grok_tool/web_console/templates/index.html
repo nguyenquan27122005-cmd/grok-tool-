@@ -7,12 +7,12 @@
   <meta name="color-scheme" content="light dark" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23229ed9'/%3E%3Cstop offset='1' stop-color='%2338bdf8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Cpath d='M9 16.5 13.2 20.5 23 10.5' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="/static/css/style.css?v=1.4" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230F172A'/%3E%3Cpath d='M8 17.2 13 22l11-13' fill='none' stroke='%2322C55E' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/css/style.css?v=1.31" />
   <script>
     (function () {
-      const theme = localStorage.getItem('theme') || 'light';
+      const theme = localStorage.getItem('theme') || 'dark';
       if (theme === 'dark') document.documentElement.classList.add('dark-theme');
       document.documentElement.dataset.theme = theme;
     })();
@@ -27,24 +27,31 @@
         <div class="brand-mark">R</div>
         <div class="brand-text">
           <strong>Reg Plane</strong>
-          <span>Multi-tool console</span>
+          <span>Control plane</span>
         </div>
       </div>
-      <nav class="nav" id="nav">
+      <nav class="nav" id="nav" aria-label="Chính">
+        <p class="nav-label">Workspace</p>
         <a href="#/register" data-route="#/register" class="nav-item is-active">
-          <span class="nav-ico">▶</span><span>Đăng ký</span>
+          <span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span>Đăng ký</span>
         </a>
         <a href="#/results" data-route="#/results" class="nav-item">
-          <span class="nav-ico">▣</span><span>Kết quả</span>
+          <span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 10h8M8 14h5" stroke-linecap="round"/></svg></span>
+          <span>Kết quả</span>
         </a>
         <a href="#/logs" data-route="#/logs" class="nav-item">
-          <span class="nav-ico">≡</span><span>Logs</span>
+          <span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6h12M6 12h12M6 18h8" stroke-linecap="round"/></svg></span>
+          <span>Logs</span>
         </a>
+        <p class="nav-label">Hệ thống</p>
         <a href="#/settings" data-route="#/settings" class="nav-item">
-          <span class="nav-ico">⚙</span><span>Cài đặt</span>
+          <span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.6.9 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
+          <span>Cài đặt</span>
         </a>
         <a href="#/tools" data-route="#/tools" class="nav-item">
-          <span class="nav-ico">⬡</span><span>Tools</span>
+          <span class="nav-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8l8-4 8 4-8 4-8-4z"/><path d="M4 16l8 4 8-4M4 12l8 4 8-4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span>Tools</span>
         </a>
       </nav>
       <div class="sidebar-foot">
@@ -52,7 +59,7 @@
           <i class="dot"></i>
           <span id="run-pill-text">Idle</span>
         </div>
-        <div class="version">v1.0 · multi-tool</div>
+        <div class="version">v1.3 · UI Pro Max</div>
       </div>
     </aside>
 
@@ -79,6 +86,6 @@
   </div>
 
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
-  <script type="module" src="/static/js/app.js?v=1.5"></script>
+  <script type="module" src="/static/js/app.js?v=1.36"></script>
 </body>
 </html>

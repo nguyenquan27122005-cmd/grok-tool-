@@ -13,11 +13,14 @@ Uses taskkill /T to reap child renderers of matched roots.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+from grokreg.core import winhide
 
 log = logging.getLogger("grok-reg")
 
@@ -126,6 +129,7 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
             capture_output=True,
             text=True,
             timeout=45,
+            **winhide.kwargs(),
         )
     except Exception as e:
         log.warning("list_chrome_processes failed: %s", e)
@@ -155,6 +159,7 @@ def _taskkill_tree(pid: int) -> bool:
             capture_output=True,
             text=True,
             timeout=20,
+            **winhide.kwargs(),
         )
         # 0 = success; 128 = not found
         return r.returncode == 0

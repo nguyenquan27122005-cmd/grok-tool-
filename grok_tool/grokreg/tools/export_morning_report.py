@@ -7,27 +7,44 @@ Xuất báo cáo sáng overnight Grok reg.
 
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parent
-ACCOUNTS = ROOT / "data" / "accounts.txt"
-FIX_LOG = ROOT / "data" / "fix_log.txt"
-OVERNIGHT_LOGS = ROOT / "data" / "overnight_logs"
-OUT_DIR = ROOT
+# grokreg/tools/ → project root (do not import grokreg.core — pulls pydoll)
+ROOT = Path(__file__).resolve().parents[2]
+DATA = ROOT / "data"
+ACCOUNTS = DATA / "accounts.txt"
+TIMES = DATA / "account_times.json"
+FIX_LOG = DATA / "fix_log.txt"
+OVERNIGHT_LOGS = DATA / "overnight_logs"
+OUT_DIR = DATA
 
 
 def now() -> datetime:
     return datetime.now()
 
 
+def _load_account_times() -> dict[str, str]:
+    if not TIMES.exists():
+        return {}
+    try:
+        raw = json.loads(TIMES.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return {str(k).lower(): str(v) for k, v in raw.items() if v}
+    except Exception:
+        pass
+    return {}
+
+
 def parse_accounts() -> list[dict]:
     rows = []
     if not ACCOUNTS.exists():
         return rows
+    times = _load_account_times()
     for ln in ACCOUNTS.read_text(encoding="utf-8", errors="ignore").splitlines():
         ln = ln.strip()
         if not ln or "|" not in ln:
@@ -36,7 +53,16 @@ def parse_accounts() -> list[dict]:
         if len(parts) < 3:
             continue
         email, password, status = parts[0].strip(), parts[1].strip(), "|".join(parts[2:]).strip()
-        rows.append({"email": email, "password": password, "status": status, "raw": ln})
+        ts = times.get(email.lower(), "")
+        rows.append(
+            {
+                "email": email,
+                "password": password,
+                "status": status,
+                "ts": ts,
+                "raw": ln,
+            }
+        )
     return rows
 
 

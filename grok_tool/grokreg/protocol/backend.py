@@ -827,22 +827,50 @@ class ProtocolRegistrationBackend:
         self.last_sso_follow = ''
 
     @staticmethod
-    def _grpc_message(*values: str) -> bytes:
-        payload = b"".join(
-            bytes([(index << 3) | 2, len(value.encode("utf-8"))]) + value.encode("utf-8")
-            for index, value in enumerate(values, 1)
-        )
+    def _varint(n: int) -> bytes:
+        parts: list[int] = []
+        n = int(n)
+        while True:
+            bit = n & 0x7F
+            n >>= 7
+            if n:
+                parts.append(bit | 0x80)
+            else:
+                parts.append(bit)
+                break
+        return bytes(parts)
+
+    @classmethod
+    def _proto_string(cls, field: int, value: str) -> bytes:
+        raw = (value or "").encode("utf-8")
+        return bytes([(int(field) << 3) | 2]) + cls._varint(len(raw)) + raw
+
+    @classmethod
+    def _grpc_message(cls, *values: str) -> bytes:
+        payload = b"".join(cls._proto_string(i, v) for i, v in enumerate(values, 1))
         return b"\x00" + len(payload).to_bytes(4, "big") + payload
 
-    def send_email_code(self, email: str, signup_url: str) -> None:
+    @classmethod
+    def _grpc_create_email(cls, email: str, castle_token: str = "") -> bytes:
+        # Browser capture: field 1 = email, field 3 = Castle request token (~17KB).
+        payload = cls._proto_string(1, email)
+        tok = (castle_token or "").strip()
+        if tok:
+            payload += cls._proto_string(3, tok)
+        return b"\x00" + len(payload).to_bytes(4, "big") + payload
+
+    def send_email_code(
+        self, email: str, signup_url: str, castle_token: str = ""
+    ) -> None:
         url = urljoin(signup_url, "/auth_mgmt.AuthManagement/CreateEmailValidationCode")
         response = self._post(
             url,
-            data=self._grpc_message(email),
+            data=self._grpc_create_email(email, castle_token),
             headers=self._headers(signup_url),
             timeout=20,
         )
         self._raise_for_protocol(response, action='send_email_code')
+        self._raise_for_grpc(response, action='send_email_code')
 
     def verify_email_code(self, email: str, code: str, signup_url: str) -> None:
         url = urljoin(signup_url, "/auth_mgmt.AuthManagement/VerifyEmailValidationCode")
@@ -853,6 +881,7 @@ class ProtocolRegistrationBackend:
             timeout=20,
         )
         self._raise_for_protocol(response, action='verify_email_code')
+        self._raise_for_grpc(response, action='verify_email_code')
 
     def submit_signup(self, payload: Mapping[str, Any], signup_url: str, turnstile_token: str = '') -> requests.Response:
         headers = self._headers(signup_url)
@@ -1026,6 +1055,32 @@ class ProtocolRegistrationBackend:
             "origin": origin,
             "referer": signup_url,
         }
+
+    @staticmethod
+    def _raise_for_grpc(response, *, action: str) -> None:
+        """gRPC-web often returns HTTP 200 with grpc-status in headers/trailers."""
+        headers = getattr(response, 'headers', None)
+        status = ''
+        message = ''
+        try:
+            if headers is not None:
+                status = str(headers.get('grpc-status') or headers.get('Grpc-Status') or '')
+                message = str(headers.get('grpc-message') or headers.get('Grpc-Message') or '')
+        except Exception:
+            pass
+        text = getattr(response, 'text', '') or ''
+        if not status:
+            m = re.search(r'grpc-status[:\s]+(\d+)', text, re.I)
+            if m:
+                status = m.group(1)
+        if not message:
+            m = re.search(r'grpc-message[:\s]+([^\r\n]+)', text, re.I)
+            if m:
+                message = m.group(1).strip()
+        if status and status not in ('0', '00'):
+            raise RuntimeError(
+                f'{action} grpc-status={status} {message[:160]}'.strip()
+            )
 
     @staticmethod
     def _raise_for_action_error(response, *, action: str) -> None:

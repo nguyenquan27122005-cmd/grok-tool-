@@ -88,6 +88,9 @@ def enqueue_sub2api(
                 "group",
                 "group_ids",
                 "name_prefix",
+                "name_include_email",
+                "refresh_usage_after_import",
+                "usage_refresh_sec",
                 "timeout_sec",
                 "timeout_oauth_sec",
                 "concurrency",
@@ -190,12 +193,27 @@ def process_queue_once(
                     items = [x for x in items if x.get("id") not in drop]
                 _save_queue(items)
             completed += 1
+            result_name = str(result.get("name") or name or "").strip()
             log.info(
                 "[delivery] retry OK id=%s email=%s name=%s",
                 rid,
                 email,
-                result.get("name") or name,
+                result_name,
             )
+            try:
+                from grokreg.core.helpers import save_account
+                from grokreg.core.paths_cfg import ACCOUNTS
+                from grokreg.reg.flow import push_results_to_gsheet
+
+                save_account(
+                    ACCOUNTS(),
+                    email,
+                    str(rec.get("password") or ""),
+                    f"added_sub2api:{result_name}" if result_name else "added_sub2api",
+                )
+                push_results_to_gsheet(config or {}, email)
+            except Exception as e:
+                log.error("[delivery] Google Sheet push failed for %s: %s", email, e)
         except Exception as exc:
             err = str(exc)[:300]
             status = "failed" if attempts >= max_attempts else "retrying"

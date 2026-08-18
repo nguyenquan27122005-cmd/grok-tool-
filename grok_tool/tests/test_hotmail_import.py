@@ -44,6 +44,21 @@ class HotmailImportTest(unittest.TestCase):
     def test_format_line(self) -> None:
         self.assertEqual(format_line("a@b.com", "p", "r", "c"), "a@b.com|p|r|c")
 
+    def test_colon_mail_pass(self) -> None:
+        out = parse_hotmail_text("c@hotmail.com:Secret123!")
+        self.assertEqual(out["ok"], 1)
+        self.assertEqual(out["rows"][0]["password"], "Secret123!")
+
+    def test_semicolon_and_quotes(self) -> None:
+        out = parse_hotmail_text('"d@outlook.com";"pw";"REFRESHTOKENVALUE12345678901234567890"')
+        self.assertEqual(out["ok"], 1)
+        self.assertEqual(out["rows"][0]["email"], "d@outlook.com")
+
+    def test_numbered_prefix(self) -> None:
+        out = parse_hotmail_text("1. e@live.com|pw")
+        self.assertEqual(out["ok"], 1)
+        self.assertEqual(out["rows"][0]["email"], "e@live.com")
+
 
 if __name__ == "__main__":
     unittest.main()

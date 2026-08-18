@@ -6,6 +6,16 @@ from typing import Dict
 
 from .base import BaseToolPlugin
 from .grok import GrokToolPlugin
+from .heygen import HeygenToolPlugin
+from .capcut import CapcutToolPlugin
+from .zai import ZaiToolPlugin
+from .canva import CanvaToolPlugin
+
+
+_BRAND_COLORS = {
+    "claude": "#D97757",
+    "openai": "#10A37F",
+}
 
 
 def _coming_soon(tool_id: str, name: str, desc: str, icon: str = "◇") -> BaseToolPlugin:
@@ -18,7 +28,7 @@ def _coming_soon(tool_id: str, name: str, desc: str, icon: str = "◇") -> BaseT
             description=desc,
             icon=icon,
             status="coming_soon",
-            color="#94a3b8",
+            color=_BRAND_COLORS.get(tool_id, "#94a3b8"),
             fields=[],
         )
 
@@ -31,10 +41,13 @@ def _coming_soon(tool_id: str, name: str, desc: str, icon: str = "◇") -> BaseT
 def all_plugins() -> Dict[str, BaseToolPlugin]:
     plugins: list[BaseToolPlugin] = [
         GrokToolPlugin(),
-        # Placeholders — replace with real plugins later
+        HeygenToolPlugin(),
+        CapcutToolPlugin(),
+        ZaiToolPlugin(),
+        CanvaToolPlugin(),
         _coming_soon("claude", "Claude / Anthropic", "Reg Claude (placeholder)", "✦"),
         _coming_soon("openai", "ChatGPT / OpenAI", "Reg OpenAI (placeholder)", "◎"),
-        _coming_soon("gemini", "Gemini / Google", "Reg Gemini (placeholder)", "✧"),
+        # Icon: drop official mark at static/img/brands/{id}.svg — see brands/README.md
     ]
     return {p.meta.id: p for p in plugins}
 

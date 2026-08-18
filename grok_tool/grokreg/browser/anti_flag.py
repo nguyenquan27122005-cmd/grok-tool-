@@ -39,11 +39,14 @@ def _detect_chrome_major() -> str:
                     maj = child.name.split(".")[0]
                     if maj.isdigit():
                         return maj
+            from grokreg.core import winhide
+
             r = subprocess.run(
                 [str(exe), "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **winhide.kwargs(),
             )
             m = re.search(r"(\d+)\.", (r.stdout or "") + (r.stderr or ""))
             if m:
@@ -463,6 +466,8 @@ def _detect_os_timezone() -> str:
         ps = (
             "[System.TimeZoneInfo]::Local.Id"
         )
+        from grokreg.core import winhide
+
         r = subprocess.run(
             [
                 "powershell.exe",
@@ -473,6 +478,7 @@ def _detect_os_timezone() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            **winhide.kwargs(),
         )
         win_id = (r.stdout or "").strip()
         win_to_iana = {
@@ -535,11 +541,14 @@ def _detect_real_screen() -> tuple[int, int]:
             "$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
             "Write-Output ($s.Width.ToString() + 'x' + $s.Height.ToString())"
         )
+        from grokreg.core import winhide
+
         r = subprocess.run(
             ["powershell.exe", "-NoProfile", "-Command", ps],
             capture_output=True,
             text=True,
             timeout=6,
+            **winhide.kwargs(),
         )
         text = (r.stdout or "").strip().splitlines()
         for line in text:
@@ -613,6 +622,8 @@ def _detect_os_lang() -> str:
     try:
         import subprocess
 
+        from grokreg.core import winhide
+
         r = subprocess.run(
             [
                 "powershell.exe",
@@ -623,6 +634,7 @@ def _detect_os_lang() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            **winhide.kwargs(),
         )
         name = (r.stdout or "").strip()  # e.g. en-US, vi-VN
         out = _normalize(name)

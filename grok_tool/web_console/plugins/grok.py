@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ class GrokToolPlugin(BaseToolPlugin):
         description="Đăng ký Grok — SSO → Sub2API · Google Sheet · ESC stop",
         icon="⚡",
         status="ready",
-        color="#229ed9",
+        color="#111111",
         fields=[
             ToolField(
                 key="mail",
@@ -51,11 +52,12 @@ class GrokToolPlugin(BaseToolPlugin):
                 key="backend",
                 label="Cách reg",
                 type="select",
-                default="protocol",
+                default="github",
                 options=[
-                    FieldOption("protocol", "HTTP ẩn (nhanh)", "không Chrome signup — cần solver :5072"),
-                    FieldOption("auto", "HTTP rồi fallback Chrome ẩn", ""),
-                    FieldOption("browser", "Chrome ẩn (off-screen)", "không cướp màn hình"),
+                    FieldOption("github", "HTTP không Chrome", "solver :5072"),
+                    FieldOption("protocol", "HTTP + Castle", "Chrome lấy token"),
+                    FieldOption("auto", "Tự động", "HTTP rồi Chrome nếu fail"),
+                    FieldOption("browser", "Chrome ẩn", ""),
                 ],
             ),
             ToolField(
@@ -69,9 +71,9 @@ class GrokToolPlugin(BaseToolPlugin):
     )
 
     def _py(self, root: Path) -> Path:
-        if os.name == "nt":
-            return root / "venv" / "Scripts" / "python.exe"
-        return root / "venv" / "bin" / "python"
+        from grokreg.core import winhide
+
+        return winhide.hidden_python(root)
 
     @staticmethod
     def _is_hotmail_mail(mail: str) -> bool:
@@ -79,6 +81,22 @@ class GrokToolPlugin(BaseToolPlugin):
         return n in ("1", "hotmail", "outlook", "ms", "microsoft")
 
     def preflight(self, params: dict[str, Any], root: Path) -> None:
+        backend = str(params.get("backend") or "github").strip().lower()
+        if backend in ("protocol", "auto", "http", "pure_http", "github", "castle"):
+            try:
+                if str(root) not in sys.path:
+                    sys.path.insert(0, str(root))
+                from grokreg.core.config import load_config
+                from services.solver_manager import get_status, start_async
+
+                cfg = load_config()
+                st = get_status(
+                    str((cfg.get("turnstile") or {}).get("solver_url") or "") or None
+                )
+                if not st.get("online"):
+                    start_async(cfg)
+            except Exception:
+                pass
         if not self._is_hotmail_mail(str(params.get("mail") or "0")):
             return
         pool = self.hotmail_pool(root)
@@ -100,9 +118,19 @@ class GrokToolPlugin(BaseToolPlugin):
         else:
             count = int(params.get("count") if params.get("count") is not None else 1)
             count = max(0, min(99, count))
-        backend = str(params.get("backend") or "protocol").strip().lower()
-        if backend not in ("protocol", "auto", "browser"):
-            backend = "protocol"
+        backend = str(params.get("backend") or "github").strip().lower()
+        if backend not in ("github", "protocol", "auto", "browser"):
+            backend = "github"
+        # Protocol/GitHub + temp mail: azpop nhận được OTP xAI, tmail thì không.
+        if backend in (
+            "github",
+            "protocol",
+            "auto",
+            "http",
+            "pure_http",
+            "castle",
+        ) and not self._is_hotmail_mail(mail):
+            mail = "2"
         return [
             str(py),
             "-u",
@@ -361,9 +389,14 @@ class GrokToolPlugin(BaseToolPlugin):
         if not parsed["rows"] and not parsed["errors"]:
             raise ValueError("Không thấy dòng Hotmail nào")
         if not parsed["rows"]:
+            sample = parsed["errors"][:3]
+            hint = "; ".join(
+                f"dòng {e['line']}: {e.get('text') or e.get('reason')}" for e in sample
+            )
             raise ValueError(
                 f"Không parse được dòng hợp lệ ({parsed['invalid']} lỗi). "
-                "Dùng email|password|refresh|client_id"
+                "Dùng email|password|refresh|client_id hoặc email:password. "
+                f"Ví dụ lỗi: {hint}"
             )
 
         path = self._hotmail_path(root)

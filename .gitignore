@@ -1,3 +1,11 @@
+capcut/config.json
+capcut/data/**
+!capcut/data/README.md
+capcut/**/__pycache__/
+capcut/**/*.pyc
+capcut/**/*.log
+capcut/**/STOP
+
 # Never publish anything except grok_tool source
 /*
 !/grok_tool/
@@ -55,6 +63,9 @@ grok_tool/*.monolith.bak
 grok_tool/account_test_results.json
 grok_tool/api_key_test_results.json
 grok_tool/*_test_results.json
+grok_tool/**/*.key
+grok_tool/**/*_progress.jsonl
+grok_tool/**/supergrok_accounts.txt
 grok_tool/.vscode/
 grok_tool/.idea/
 grok_tool/.DS_Store

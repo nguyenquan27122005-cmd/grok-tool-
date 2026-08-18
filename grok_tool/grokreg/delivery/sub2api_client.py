@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 
@@ -101,6 +101,41 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _usage_status(payload: dict[str, Any] | None) -> tuple[int, str]:
+    """Real Grok usage code from a quota payload or stored snapshot."""
+    data = payload if isinstance(payload, dict) else {}
+    err = str(
+        data.get("probe_error")
+        or data.get("error")
+        or data.get("message")
+        or ""
+    ).strip()
+    snap = data.get("snapshot") if isinstance(data.get("snapshot"), dict) else {}
+    bill = data.get("billing") if isinstance(data.get("billing"), dict) else {}
+    code = (
+        _as_int(snap.get("status_code"), 0)
+        or _as_int(bill.get("status_code"), 0)
+        or _as_int(data.get("status_code"), 0)
+    )
+    blob = err + " " + str(data.get("probe_error") or "")
+    if "403" in blob or "GROK_QUOTA_PROBE_UPSTREAM_ERROR" in blob:
+        if code in (0, 200):
+            code = 403
+    return code, err
+
+
+def _usage_ready(code: int, err: str) -> bool:
+    """True when admin will show usage (not the Cấm/403 import artifact)."""
+    if code == 429:
+        return True
+    if code != 200:
+        return False
+    low = (err or "").lower()
+    if "403" in low or "grok_quota_probe_upstream" in low:
+        return False
+    return True
 
 
 class Sub2APIClient:
@@ -332,6 +367,177 @@ class Sub2APIClient:
             "token_preview": f"{token[:8]}…" if token else "",
         }
 
+    def search_accounts(
+        self,
+        query: str,
+        *,
+        platform: str = "grok",
+        page_size: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Admin account search. Sub2API matches NAME only (not credentials.email)."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        path = f"/api/v1/admin/accounts?search={quote(q)}&page=1&page_size={max(1, int(page_size))}"
+        if platform:
+            path += f"&platform={quote(platform)}"
+        data = self._request_json("GET", path, timeout=min(30.0, self.timeout))
+        if isinstance(data, list):
+            return [a for a in data if isinstance(a, dict)]
+        if isinstance(data, dict):
+            items = data.get("items") or data.get("accounts") or data.get("list") or []
+            if isinstance(items, list):
+                return [a for a in items if isinstance(a, dict)]
+        return []
+
+    def find_account_by_name(self, name: str) -> dict[str, Any] | None:
+        want = (name or "").strip().lower()
+        if not want:
+            return None
+        for acc in self.search_accounts(name, page_size=50):
+            if str(acc.get("name") or "").strip().lower() == want:
+                return acc
+        return None
+
+    def get_account(self, account_id: int) -> dict[str, Any]:
+        aid = _as_int(account_id, 0)
+        if aid <= 0:
+            raise Sub2APIError("account_id is invalid")
+        data = self._request_json(
+            "GET",
+            f"/api/v1/admin/accounts/{aid}",
+            timeout=min(30.0, self.timeout),
+        )
+        if not isinstance(data, dict):
+            raise Sub2APIError(f"sub2api account {aid} returned unexpected payload")
+        return data
+
+    def probe_quota(self, account_id: int, *, timeout: float | None = None) -> dict[str, Any]:
+        """GET /admin/grok/accounts/:id/quota — same as admin 'Đầu dò'."""
+        aid = _as_int(account_id, 0)
+        if aid <= 0:
+            raise Sub2APIError("account_id is invalid")
+        wait = 12.0 if timeout is None else max(3.0, float(timeout))
+        data = self._request_json(
+            "GET",
+            f"/api/v1/admin/grok/accounts/{aid}/quota",
+            timeout=wait,
+        )
+        if not isinstance(data, dict):
+            raise Sub2APIError(f"sub2api quota probe {aid} returned unexpected payload")
+        return data
+
+    def ensure_usage_visible(
+        self,
+        account_id: int,
+        *,
+        budget_sec: float = 20.0,
+        wait_import_probe_sec: float | None = None,
+        retries: int = 1,
+    ) -> dict[str, Any]:
+        """
+        After SSO import, keep probing until admin can show usage (200/429).
+
+        Sub2API's first auto-probe is often 403 (Cấm) — that is not a ban.
+        We retry until a real usage snapshot lands, within budget_sec.
+        """
+        aid = _as_int(account_id, 0)
+        if aid <= 0:
+            raise Sub2APIError("account_id is invalid")
+
+        budget = min(30.0, max(8.0, float(budget_sec or 20.0)))
+        started = time.time()
+        deadline = started + budget
+        last_code = 0
+        last_err = ""
+        last_headers = False
+        last_source = None
+        attempt = 0
+
+        while True:
+            attempt += 1
+            remaining = deadline - time.time()
+            if remaining < 2.5 and attempt > 1:
+                break
+            try:
+                acc = self.get_account(aid)
+                extra = acc.get("extra") if isinstance(acc.get("extra"), dict) else {}
+                snap = extra.get("grok_usage_snapshot")
+                if isinstance(snap, dict) and snap:
+                    code, err = _usage_status(snap)
+                    if _usage_ready(code, err):
+                        elapsed = round(time.time() - started, 2)
+                        log.info(
+                            "[sub2api-api] usage already visible id=%s code=%s elapsed=%.1fs",
+                            aid,
+                            code,
+                            elapsed,
+                        )
+                        return {
+                            "ok": True,
+                            "account_id": aid,
+                            "status_code": code,
+                            "waited": True,
+                            "elapsed_s": elapsed,
+                            "attempts": attempt,
+                        }
+            except Sub2APIError as exc:
+                log.debug("[sub2api-api] wait usage id=%s: %s", aid, exc)
+
+            probe_timeout = min(12.0, max(3.0, remaining if remaining > 0 else 8.0))
+            try:
+                last = self.probe_quota(aid, timeout=probe_timeout)
+            except Sub2APIError as exc:
+                last_err = str(exc)[:200]
+                last_code = last_code or 0
+                log.warning(
+                    "[sub2api-api] usage probe fail id=%s try=%s: %s",
+                    aid,
+                    attempt,
+                    exc,
+                )
+                last = {}
+            else:
+                last_code, last_err = _usage_status(last)
+                last_headers = bool(last.get("headers_observed"))
+                last_source = last.get("source")
+                log.info(
+                    "[sub2api-api] usage probe id=%s try=%s code=%s headers=%s err=%s",
+                    aid,
+                    attempt,
+                    last_code,
+                    last_headers,
+                    (last_err[:80] if last_err else ""),
+                )
+                if _usage_ready(last_code, last_err):
+                    elapsed = round(time.time() - started, 2)
+                    return {
+                        "ok": True,
+                        "account_id": aid,
+                        "status_code": last_code,
+                        "headers_observed": last_headers,
+                        "source": last_source,
+                        "elapsed_s": elapsed,
+                        "attempts": attempt,
+                        "note": "rate_limited_shows_usage" if last_code == 429 else None,
+                    }
+
+            if time.time() >= deadline:
+                break
+            time.sleep(min(2.5, max(0.8, deadline - time.time())))
+
+        elapsed = round(time.time() - started, 2)
+        return {
+            "ok": False,
+            "account_id": aid,
+            "status_code": last_code,
+            "headers_observed": last_headers,
+            "source": last_source,
+            "probe_error": last_err or None,
+            "elapsed_s": elapsed,
+            "attempts": attempt,
+        }
+
     def import_sso(
         self,
         sso_cookie: str,
@@ -344,6 +550,7 @@ class Sub2APIClient:
         priority: int = 1,
         auto_pause_on_expired: bool = True,
         notes: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         sso = (sso_cookie or "").strip()
         if not sso:
@@ -358,8 +565,16 @@ class Sub2APIClient:
         account_name = (name or email or "").strip()
         if account_name:
             body["name"] = account_name
-        if notes is not None:
-            body["notes"] = notes
+        note = (notes if notes is not None else email or "").strip()
+        if note:
+            body["notes"] = note
+        extra_body: dict[str, Any] = dict(extra or {})
+        if email and "email" not in extra_body:
+            extra_body["email"] = email
+        if email and "email_address" not in extra_body:
+            extra_body["email_address"] = email
+        if extra_body:
+            body["extra"] = extra_body
         if group_ids:
             body["group_ids"] = [int(g) for g in group_ids if int(g) > 0]
         if proxy_id and int(proxy_id) > 0:
@@ -391,19 +606,25 @@ class Sub2APIClient:
 
         item = created[0] if isinstance(created[0], dict) else {}
         account = item.get("account") if isinstance(item.get("account"), dict) else {}
+        created_id = account.get("id")
+        created_name = item.get("name") or account.get("name") or account_name
+        cred_email = ""
+        if isinstance(account.get("credentials"), dict):
+            cred_email = str(account["credentials"].get("email") or "")
         log.info(
-            "[sub2api-api] SSO import OK name=%s email=%s id=%s",
-            account_name or item.get("name") or "(unnamed)",
-            item.get("email") or email or "",
-            account.get("id") or "",
+            "[sub2api-api] SSO import OK name=%s email=%s id=%s — search admin by NAME %r (email search is name-only)",
+            created_name or "(unnamed)",
+            item.get("email") or cred_email or email or "",
+            created_id or "",
+            created_name or account_name,
         )
         return {
             "ok": True,
             "created_count": len(created),
             "failed_count": len(failed),
-            "name": item.get("name") or account_name,
-            "email": item.get("email") or email or "",
-            "account_id": account.get("id"),
+            "name": created_name,
+            "email": item.get("email") or cred_email or email or "",
+            "account_id": created_id,
             "account": account,
             "raw": data,
         }
@@ -477,6 +698,10 @@ def export_sso_to_sub2api(
             log.warning("[sub2api-api] resolve group failed: %s", e)
 
     account_name = (name or email or "").strip()
+    email_clean = (email or "").strip()
+    if sub_cfg.get("name_include_email") and email_clean:
+        if email_clean.lower() not in account_name.lower():
+            account_name = f"{account_name} {email_clean}".strip()
     proxy_raw = str(sub_cfg.get("proxy_id") or sub_cfg.get("sub2api_proxy_id") or "").strip()
     proxy_id = _as_int(proxy_raw, 0) or None
     concurrency = _as_int(sub_cfg.get("concurrency") or 1, 1)
@@ -487,16 +712,45 @@ def export_sso_to_sub2api(
         "yes",
     )
 
-    return client.import_sso(
+    result = client.import_sso(
         sso_cookie,
-        email=email,
+        email=email_clean,
         name=account_name,
         group_ids=group_ids,
         proxy_id=proxy_id,
         concurrency=concurrency,
         priority=priority,
         auto_pause_on_expired=auto_pause,
+        notes=email_clean or None,
+        extra={"email": email_clean, "email_address": email_clean} if email_clean else None,
     )
+    if sub_cfg.get("refresh_usage_after_import", True):
+        aid = _as_int(result.get("account_id"), 0)
+        if aid > 0:
+            try:
+                usage = client.ensure_usage_visible(
+                    aid,
+                    budget_sec=_as_int(sub_cfg.get("usage_refresh_sec"), 20) or 20,
+                )
+                result["usage"] = usage
+                if usage.get("ok"):
+                    log.info(
+                        "[sub2api-api] usage ready id=%s code=%s — admin will show usage not Cấm",
+                        aid,
+                        usage.get("status_code"),
+                    )
+                else:
+                    log.warning(
+                        "[sub2api-api] usage still not 200 id=%s code=%s err=%s",
+                        aid,
+                        usage.get("status_code"),
+                        usage.get("probe_error"),
+                    )
+            except Exception as e:
+                log.warning("[sub2api-api] usage refresh skipped id=%s: %s", aid, e)
+        else:
+            log.warning("[sub2api-api] no account_id after import — cannot refresh usage")
+    return result
 
 
 def test_sub2api_connection(sub_cfg: dict[str, Any]) -> dict[str, Any]:

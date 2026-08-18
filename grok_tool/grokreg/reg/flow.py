@@ -336,10 +336,15 @@ def push_results_to_gsheet(
         return False
     sheet_name = str(gs.get("sheet_title") or gs.get("tab_name") or "Grok Acc Trắng")
     try:
-        from grokreg.delivery.gsheets_export import export_to_google_sheets
+        from grokreg.delivery.gsheets_export import (
+            append_one_to_sheet,
+            export_to_google_sheets,
+        )
 
-        # Empty data → build_payload reads accounts.txt (full success ledger)
-        msg = export_to_google_sheets({})
+        if email:
+            msg = append_one_to_sheet(email, tab="grok")
+        else:
+            msg = export_to_google_sheets({})
         log.info("Google Sheet push OK: %s", str(msg)[:160])
         if email:
             slog.sheet_ok(email, sheet_name=sheet_name)
@@ -1363,6 +1368,8 @@ async def register_one(config: dict[str, Any]) -> None:
                     await maybe_bring_to_front(tab, config)
                     # restore tool chrome window on-screen
                     pos = str(config.get("chrome_window_position") or "80,40")
+                    from grokreg.core import winhide
+
                     subprocess.run(
                         [
                             "powershell",
@@ -1393,6 +1400,7 @@ Get-CimInstance Win32_Process -Filter \\"Name='chrome.exe'\\" | Where-Object {{
                         ],
                         capture_output=True,
                         timeout=8,
+                        **winhide.kwargs(),
                     )
                 except Exception as e:
                     log.debug("force visible: %s", e)
@@ -2008,12 +2016,7 @@ Get-CimInstance Win32_Process -Filter \\"Name='chrome.exe'\\" | Where-Object {{
 
     # Push Google Sheet after accounts.txt is written (success ledger)
     st_final = str(status or "")
-    if (
-        st_final == "success"
-        or st_final.startswith("added_sub2api")
-        or st_final.startswith("success_sub2api")
-        or st_final.startswith("added_sub2api_untested")
-    ):
+    if st_final.startswith("added_sub2api"):
         ok_sheet = push_results_to_gsheet(
             config, email_session.address
         )

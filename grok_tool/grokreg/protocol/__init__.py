@@ -8,4 +8,7 @@ from grokreg.protocol.backend import (  # noqa: F401
     clear_identity_cookies,
     read_sso_cookie_from_session,
 )
-from grokreg.protocol.worker import register_one_protocol  # noqa: F401
+from grokreg.protocol.worker import (  # noqa: F401
+    register_one_github,
+    register_one_protocol,
+)

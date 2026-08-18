@@ -263,10 +263,13 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object {
 }
 """
     try:
+        from grokreg.core import winhide
+
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True,
             timeout=8,
+            **winhide.kwargs(),
         )
         log.info("Chrome automation windows minimized (no focus steal)")
     except Exception as e:
@@ -316,10 +319,13 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object {{
 }}
 """
     try:
+        from grokreg.core import winhide
+
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps],
             capture_output=True,
             timeout=10,
+            **winhide.kwargs(),
         )
         log.info(
             "Chrome kéo về off-screen (%s,%s)%s",
@@ -1170,10 +1176,13 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object {{
   }}
 }}
 """
+                from grokreg.core import winhide
+
                 subprocess.run(
                     ["powershell", "-NoProfile", "-Command", ps],
                     capture_output=True,
                     timeout=10,
+                    **winhide.kwargs(),
                 )
                 log.info("Chrome restored on-screen at %s,%s for inspection", x, y)
         except Exception as e:

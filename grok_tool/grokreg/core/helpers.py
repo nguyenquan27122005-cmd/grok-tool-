@@ -16,6 +16,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urljoin
@@ -151,6 +152,39 @@ def random_name(
 _CURRENT_EMAIL_PROVIDER: str = ""
 
 
+def remember_account_time(
+    email: str,
+    when: str | None = None,
+    *,
+    overwrite: bool = False,
+) -> str:
+    """Persist first-seen Sub2/reg time per email (Asia/local wall clock)."""
+    em = (email or "").strip().lower()
+    if not em or "@" not in em:
+        return ""
+    stamp = (when or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    path = Path(__file__).resolve().parents[2] / "data" / "account_times.json"
+    data: dict[str, str] = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = {str(k).lower(): str(v) for k, v in raw.items() if v}
+        except Exception:
+            data = {}
+    if not overwrite and data.get(em):
+        return data[em]
+    data[em] = stamp
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+    except Exception:
+        pass
+    return stamp
+
+
 def save_account(path: Path, email: str, password: str, status: str) -> None:
     """
     Internal ledger only (source for Google Sheet rebuild).
@@ -160,6 +194,14 @@ def save_account(path: Path, email: str, password: str, status: str) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(f"{email}|{password}|{status}\n")
     log.debug("Internal ledger → %s | %s", email, status)
+    st = str(status or "")
+    if st.startswith("added_sub2api") or st == "success" or st.startswith(
+        "success_sub2api"
+    ):
+        try:
+            remember_account_time(email)
+        except Exception:
+            pass
     # Failover learning: OTP lag on azpop → next run prefers wibu (and reverse)
     try:
         prov = (_CURRENT_EMAIL_PROVIDER or "").lower()
@@ -177,6 +219,48 @@ def normalize_otp_for_input(otp: str) -> str:
     if not otp:
         return ""
     return re.sub(r"[^A-Za-z0-9]", "", str(otp)).upper()
+
+
+_OTP_JUNK = {
+    "RAWHTML",
+    "HTML",
+    "HTTPS",
+    "HTTP",
+    "UTF8",
+    "JSON",
+    "SCRIPT",
+    "STYLES",
+    "STYLE",
+    "DOCTYPE",
+    "CHARSET",
+    "WINDOW",
+    "DOCUMENT",
+}
+
+
+def is_plausible_xai_otp(otp: str) -> bool:
+    """xAI codes are 6 mixed alnum (YI2BKR / SX8T88), not CSS/HTML junk like PER-100."""
+    raw = str(otp or "").strip().upper()
+    n = normalize_otp_for_input(raw)
+    if len(n) != 6:
+        return False
+    if n in _OTP_JUNK:
+        return False
+    # 638-944 / 638944 — xAI sometimes sends a 6-digit dashed code.
+    if re.fullmatch(r"\d{3}-\d{3}", raw) or (
+        re.fullmatch(r"\d{6}", n) and "-" not in raw
+    ):
+        return True
+    if not re.search(r"[A-Z]", n) or not re.search(r"\d", n):
+        return False
+    # reject PER-100 / UTF-8 style halves that are pure digits or junk words
+    if "-" in raw:
+        left, _, right = raw.partition("-")
+        if left.isalpha() and right.isdigit():
+            return False
+        if left.isdigit() and right.isalpha():
+            return False
+    return True
 
 
 # xAI codes: YI2-BKR, YE8-CQ8, sometimes 4-3 or 2-4 groups; also pure 6 digits
@@ -273,7 +357,7 @@ def extract_otp(text: str, pattern: str | None = None) -> Optional[str]:
 
     def _add(code: str, pos: int, local_ctx: str) -> None:
         code_u = (code or "").strip().upper()
-        if not code_u:
+        if not code_u or not is_plausible_xai_otp(code_u):
             return
         # window context around match
         lo = max(0, pos - 80)

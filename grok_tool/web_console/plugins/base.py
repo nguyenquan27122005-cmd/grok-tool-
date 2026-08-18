@@ -17,7 +17,7 @@ class FieldOption:
 class ToolField:
     key: str
     label: str
-    type: str = "text"  # text | number | select | checkbox | password
+    type: str = "text"  # text | number | select | checkbox | password | textarea
     default: Any = ""
     options: list[FieldOption] = field(default_factory=list)
     hint: str = ""
@@ -34,6 +34,8 @@ class ToolMeta:
     status: str = "ready"  # ready | beta | coming_soon
     fields: list[ToolField] = field(default_factory=list)
     color: str = "#229ed9"
+    # Official publisher mark. Empty = auto /static/img/brands/{id}.svg|.png|.webp
+    brand_icon: str = ""
 
 
 class BaseToolPlugin:

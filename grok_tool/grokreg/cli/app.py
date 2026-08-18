@@ -164,10 +164,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "-b",
         dest="backend",
         default=None,
-        choices=("browser", "protocol", "auto"),
+        choices=("browser", "protocol", "github", "auto"),
         help=(
-            "browser=Chrome UI (default) | protocol=HTTP pure (nhanh ~30s, cần Turnstile solver) "
-            "| auto=protocol rồi fallback browser"
+            "browser=Chrome UI | github=HTTP GitHub 0 Chrome (~30s, solver :5072) "
+            "| protocol=HTTP + Castle (Chrome mint) | auto=github rồi fallback Chrome"
         ),
     )
     return p
@@ -192,6 +192,20 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
     # CLI override: --backend protocol
     if getattr(args, "backend", None):
         config["reg_backend"] = str(args.backend).strip().lower()
+
+    backend_now = str(
+        config.get("reg_backend")
+        or (config.get("protocol") or {}).get("mode")
+        or "browser"
+    ).strip().lower()
+    if backend_now in ("protocol", "auto", "http", "pure_http", "github", "castle"):
+        try:
+            from services.solver_manager import start_async
+
+            start_async(config)
+            log.info("Turnstile solver: auto-start background (:5072)")
+        except Exception as e:
+            log.debug("solver auto-start: %s", e)
 
     # Optional per-worker overrides (stress_test.py / multi-instance)
     if os.environ.get("GROK_CHROME_PORT", "").strip():
@@ -303,12 +317,25 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
                     or (config.get("protocol") or {}).get("mode")
                     or "browser"
                 ).strip().lower()
-                if backend in ("protocol", "http", "pure_http"):
-                    slog.api_info("⚡", "Backend PROTOCOL (HTTP pure — competitor path)")
+                if backend in ("github", "http", "pure_http"):
+                    slog.api_info("⚡", "Backend GITHUB (HTTP thuần — 0 Chrome)")
+                    from grokreg.protocol.worker import register_one_github
+
+                    def _run_github():
+                        return register_one_github(config)
+
+                    result = await asyncio.to_thread(_run_github)
+                    status = result.status
+                    if result.ok:
+                        slog.api_ok(
+                            f"GitHub-HTTP OK {result.email} in {result.duration_sec:.1f}s → {status}"
+                        )
+                elif backend in ("protocol", "castle"):
+                    slog.api_info("⚡", "Backend PROTOCOL (HTTP + Castle Chrome)")
                     from grokreg.protocol.worker import register_one_protocol
 
                     def _run_proto():
-                        return register_one_protocol(config)
+                        return register_one_protocol(config, castle=True)
 
                     result = await asyncio.to_thread(_run_proto)
                     status = result.status
@@ -317,10 +344,10 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
                             f"Protocol OK {result.email} in {result.duration_sec:.1f}s → {status}"
                         )
                 elif backend == "auto":
-                    slog.api_info("⚡", "Backend AUTO — thử protocol trước")
-                    from grokreg.protocol.worker import register_one_protocol
+                    slog.api_info("⚡", "Backend AUTO — thử HTTP GitHub trước")
+                    from grokreg.protocol.worker import register_one_github
 
-                    result = await asyncio.to_thread(register_one_protocol, config)
+                    result = await asyncio.to_thread(register_one_github, config)
                     if result.ok and (
                         result.status.startswith("added_sub2api")
                         or result.status == "success"

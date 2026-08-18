@@ -1921,8 +1921,15 @@ async def add_grok_via_sso_api(
             email=email,
             name=name,
         )
-        msg = f"sso_api ok id={result.get('account_id') or ''}"
-        return Sub2APIResult(True, name, "sso_api", msg)
+        created_id = result.get("account_id") or ""
+        created_name = str(result.get("name") or name)
+        msg = f"sso_api ok id={created_id} search_name={created_name!r}"
+        log.info(
+            "[sub2api] SSO imported — Sub2API id=%s name=%s. Admin search is NAME-only; do not search email.",
+            created_id,
+            created_name,
+        )
+        return Sub2APIResult(True, created_name, "sso_api", msg)
     except Exception as e:
         log.warning("[sub2api] SSO API failed name=%s stage=%s: %s", name, stage, e)
         return Sub2APIResult(False, name, stage, str(e)[:200])
@@ -1987,6 +1994,8 @@ async def add_grok_via_browser_oauth(
             run_test = False
         if not run_test:
             log.info("[sub2api] skip Test Connection (sub2api.run_test=false)")
+            if cfg.get("refresh_usage_after_import", True):
+                await asyncio.to_thread(_refresh_usage_by_name, cfg, name)
             return Sub2APIResult(True, name, "complete", "created (test skipped)")
 
         stage = "test"
@@ -2127,6 +2136,42 @@ async def add_grok_to_sub2api(
         _maybe_enqueue_delivery(cfg, email, password, sso, name, result.message)
         return result
     return Sub2APIResult(False, name, "skip", f"mode={mode} no path taken")
+
+
+def _refresh_usage_by_name(cfg: dict[str, Any], name: str) -> None:
+    """After browser-OAuth create, probe quota so admin shows usage instead of Cấm."""
+    if not (name or "").strip():
+        return
+    try:
+        from grokreg.delivery.sub2api_client import client_from_cfg
+
+        client = client_from_cfg(cfg)
+        acc = client.find_account_by_name(name)
+        aid = 0
+        if isinstance(acc, dict):
+            try:
+                aid = int(acc.get("id") or 0)
+            except (TypeError, ValueError):
+                aid = 0
+        if aid <= 0:
+            log.warning("[sub2api] usage refresh: account %r not found", name)
+            return
+        budget = 20
+        try:
+            nested = cfg.get("sub2api") if isinstance(cfg.get("sub2api"), dict) else {}
+            budget = int(cfg.get("usage_refresh_sec") or nested.get("usage_refresh_sec") or 20)
+        except (TypeError, ValueError):
+            budget = 20
+        usage = client.ensure_usage_visible(aid, budget_sec=budget)
+        log.info(
+            "[sub2api] usage refresh name=%s id=%s ok=%s code=%s",
+            name,
+            aid,
+            usage.get("ok"),
+            usage.get("status_code"),
+        )
+    except Exception as e:
+        log.warning("[sub2api] usage refresh failed name=%s: %s", name, e)
 
 
 def _maybe_enqueue_delivery(

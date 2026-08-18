@@ -14,12 +14,20 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+# File lives in grokreg/tools/ — project root is two levels up.
+ROOT = Path(__file__).resolve().parents[2]
 FIX_LOG = ROOT / "data" / "fix_log.txt"
 LOCK = ROOT / "data" / "overnight.lock"
-PY = ROOT / "venv" / "Scripts" / "python.exe"
-if not PY.exists():
-    PY = Path(sys.executable)
+try:
+    from grokreg.core import winhide
+
+    PY = winhide.hidden_python(ROOT if (ROOT / "venv").is_dir() else ROOT.parent.parent)
+except Exception:
+    PY = ROOT / "venv" / "Scripts" / "pythonw.exe"
+    if not PY.exists():
+        PY = ROOT / "venv" / "Scripts" / "python.exe"
+    if not PY.exists():
+        PY = Path(sys.executable)
 
 STOP_HOUR = 6
 HARD_TIMEOUT = 360  # full reg+sub2api can take 3-5 min
@@ -79,6 +87,8 @@ def kill_main_only() -> None:
     """Kill leftover main.py only — NEVER kill overnight_runner, NEVER taskkill all chrome."""
     my = os.getpid()
     try:
+        from grokreg.core import winhide
+
         subprocess.run(
             [
                 "powershell",
@@ -87,13 +97,14 @@ def kill_main_only() -> None:
                 rf"""
 $ErrorActionPreference='SilentlyContinue'
 $keep={my}
-Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {{
-  $_.CommandLine -match 'main\.py' -and $_.ProcessId -ne $keep -and $_.CommandLine -notmatch 'overnight'
+Get-CimInstance Win32_Process | Where-Object {{
+  $_.Name -match 'python' -and $_.CommandLine -match 'main\.py' -and $_.ProcessId -ne $keep -and $_.CommandLine -notmatch 'overnight'
 }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
 """,
             ],
             capture_output=True,
             timeout=12,
+            **winhide.kwargs(),
         )
     except Exception as e:
         log(f"kill_main_only: {e}")
@@ -205,8 +216,15 @@ def run_one(run_id: int) -> tuple[str, float]:
     status = ""
     try:
         with open(log_path, "w", encoding="utf-8") as lf:
+            from grokreg.core import winhide
+
             proc = subprocess.Popen(
-                cmd, cwd=str(ROOT), env=env, stdout=lf, stderr=subprocess.STDOUT
+                cmd,
+                cwd=str(ROOT),
+                env=env,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                **winhide.kwargs(new_group=True),
             )
             log(f"START run#{run_id} pid={proc.pid} log={log_path.name}")
             last_sz = 0
@@ -280,10 +298,13 @@ def main() -> int:
     log(f"HARD_TIMEOUT={HARD_TIMEOUT}s per acc")
 
     try:
+        from grokreg.core import winhide
+
         subprocess.run(
             ["powercfg", "/change", "standby-timeout-ac", "0"],
             capture_output=True,
             timeout=5,
+            **winhide.kwargs(),
         )
     except Exception:
         pass

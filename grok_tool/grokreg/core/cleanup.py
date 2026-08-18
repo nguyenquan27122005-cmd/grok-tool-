@@ -90,11 +90,14 @@ Write-Output $n
             None,
         )
         if exe:
+            from grokreg.core import winhide
+
             r = subprocess.run(
                 [exe, "-NoProfile", "-Command", ps],
                 capture_output=True,
                 text=True,
                 timeout=30,
+                **winhide.kwargs(),
             )
             n = (r.stdout or "").strip().splitlines()
             killed = n[-1] if n else "?"

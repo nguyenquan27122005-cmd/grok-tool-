@@ -1,5 +1,5 @@
-import * as api from './api.js?v=1.5';
-import { toast } from './toast.js?v=1.5';
+import * as api from './api.js?v=1.36';
+import { toast } from './toast.js?v=1.36';
 
 const getTools = api.getTools;
 const getToolStats = api.getToolStats;
@@ -21,7 +21,7 @@ const importHotmails =
       };
 
 const PAGE_META = {
-  '#/register': { title: 'Đăng ký', eyebrow: 'Task Console' },
+  '#/register': { title: 'Đăng ký', eyebrow: 'Control Plane' },
   '#/results': { title: 'Kết quả', eyebrow: 'Accounts & Status' },
   '#/logs': { title: 'Logs', eyebrow: 'Live Stream' },
   '#/settings': { title: 'Cài đặt', eyebrow: 'System Config' },
@@ -43,6 +43,25 @@ const state = {
 function isHotmailMail(val) {
   const v = String(val ?? '').trim().toLowerCase();
   return v === '1' || v === 'hotmail' || v === 'outlook' || v === 'ms';
+}
+
+function isSheetOnly(id) {
+  return id === 'heygen' || id === 'capcut' || id === 'zai' || id === 'canva';
+}
+
+function brandIconSrc(t) {
+  if (t.brand_icon) return t.brand_icon;
+  return `/static/img/brands/${t.id}.svg`;
+}
+
+function brandIconHtml(t) {
+  const src = brandIconSrc(t);
+  const name = t.name || t.id || '';
+  return `<div class="ico brand-official" data-brand="${esc(t.id)}">
+    <img src="${esc(src)}" alt="${esc(name)}" width="40" height="40"
+      onerror="this.onerror=null;this.remove();this.parentElement.classList.add('is-fallback');" />
+    <span class="ico-fallback">${esc(t.icon || '')}</span>
+  </div>`;
 }
 
 /* ── Theme / chrome ── */
@@ -83,6 +102,15 @@ function setActiveNav(hash) {
   document.title = `${meta.title} · Reg Control Plane`;
 }
 
+function revealLiveLog() {
+  const panel = document.querySelector('.console-card') || document.getElementById('log-box');
+  if (!panel) return;
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  panel.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  const box = document.getElementById('log-box');
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
 function updateRunPill(job) {
   const pill = document.getElementById('run-pill');
   const text = document.getElementById('run-pill-text');
@@ -119,12 +147,21 @@ function statusTag(status, ok) {
   return `<span class="tag tag-fail">${esc(status || 'fail')}</span>`;
 }
 
+function toolLabel() {
+  const t = (state.tools || []).find((x) => x.id === state.selectedTool);
+  return t?.name || 'tool';
+}
+
 function hotmailPlanText(pool) {
   const acc = Number(pool?.count ?? 0);
   const slots = Number(pool?.slots ?? acc);
   const maxA = Number(pool?.max_aliases ?? 5);
+  const name = toolLabel();
   if (!acc) return 'Pool trống — import Hotmail rồi Start.';
-  return `Sẽ reg <strong>${slots}</strong> acc Grok từ ${acc} Hotmail (mỗi acc tối đa ${maxA} alias).`;
+  if (maxA <= 1) {
+    return `Sẽ reg <strong>${slots}</strong> acc ${esc(name)} từ ${acc} Hotmail (1 mail = 1 acc).`;
+  }
+  return `Sẽ reg <strong>${slots}</strong> acc ${esc(name)} từ ${acc} Hotmail (mỗi acc tối đa ${maxA} alias).`;
 }
 
 function syncHotmailUi(root) {
@@ -137,6 +174,23 @@ function syncHotmailUi(root) {
   if (plan) {
     plan.hidden = !hotmail;
     plan.innerHTML = hotmailPlanText(state.hotmailPool);
+  }
+}
+
+function syncCanvaJobUi(root) {
+  if (state.selectedTool !== 'canva') return;
+  const redeem = String(state.form.job || 'reg') === 'redeem';
+  const codesEl = root.querySelector('[data-field-wrap="codes"]');
+  if (codesEl) codesEl.hidden = false;
+  const thr = root.querySelector('[data-field-wrap="threads"]');
+  if (thr) thr.hidden = !redeem;
+  const panel = root.querySelector('#hotmail-pool');
+  const plan = root.querySelector('#hotmail-plan');
+  if (redeem) {
+    if (panel) panel.hidden = true;
+    if (plan) plan.hidden = true;
+    const countWrap = root.querySelector('[data-field-wrap="count"]');
+    if (countWrap) countWrap.hidden = true;
   }
 }
 
@@ -162,7 +216,7 @@ function hotmailPanelHtml(pool, show) {
         <div>
           <div class="card-title">Pool Hotmail</div>
           <div class="card-sub">
-            ${count} Hotmail · Start sẽ reg ${pool?.slots ?? count} Grok (×${maxA} alias) ·
+            ${count} Hotmail · Start sẽ reg ${pool?.slots ?? count} ${esc(toolLabel())}${maxA > 1 ? ` (×${maxA} alias)` : ''} ·
             <span class="mono">${esc(pool?.path || 'data/hotmails.txt')}</span>
           </div>
         </div>
@@ -170,12 +224,13 @@ function hotmailPanelHtml(pool, show) {
       <div class="field">
         <label>Dán Hotmail vào đây</label>
         <textarea id="hotmail-draft" rows="7" placeholder="email|password|refresh_token|client_id
+email:password
 email----password----client_id----refresh_token">${esc(state.hotmailDraft || '')}</textarea>
-        <div class="hint">1 dòng = 1 acc = 1 lượt reg. Hỗ trợ <span class="mono">|</span> hoặc <span class="mono">----</span>. Alias +1…+${Math.max(0, maxA - 1)} dùng ở lần Start sau (còn slot).</div>
+        <div class="hint">1 dòng = 1 acc. Nhận <span class="mono">|</span> <span class="mono">:</span> <span class="mono">----</span> <span class="mono">;</span> tab.${maxA > 1 ? ` Alias +1…+${maxA - 1} dùng ở lần Start sau (còn slot).` : ''}</div>
       </div>
       <div class="btn-row" style="margin:8px 0 12px">
-        <button type="button" class="btn btn-ghost" id="btn-hotmail-browse">📂 Browse file…</button>
-        <button type="button" class="btn btn-primary" id="btn-hotmail-add">＋ Thêm vào pool</button>
+        <button type="button" class="btn btn-ghost" id="btn-hotmail-browse">Browse file</button>
+        <button type="button" class="btn btn-primary" id="btn-hotmail-add">Thêm vào pool</button>
         <button type="button" class="btn btn-ghost" id="btn-hotmail-replace">Ghi đè pool</button>
         <input type="file" id="hotmail-file" accept=".txt,.csv,.tsv,.log,.text,text/plain" hidden />
       </div>
@@ -281,7 +336,7 @@ async function renderRegister(root) {
   try {
     if (tool.status === 'ready') stats = await getToolStats(tool.id);
   } catch (_) {}
-  if (tool.id === 'grok') {
+  if (['grok', 'heygen', 'capcut', 'zai', 'canva'].includes(tool.id)) {
     try {
       state.hotmailPool = await getHotmails(tool.id);
     } catch (_) {
@@ -300,16 +355,22 @@ async function renderRegister(root) {
           <div class="stat-value">${stats.unique_emails ?? stats.total ?? '—'}</div>
           <div class="card-sub" style="margin-top:4px">${stats.attempts ?? '—'} lượt thử</div>
         </div>
-        <div class="stat-card ok" title="Reg xong: Sub2API + reg-only + reg OK nhưng sub2 fail">
+        <div class="stat-card ok" title="${isSheetOnly(tool.id) ? 'Reg thành công — chỉ lên Google Sheet, không Sub2' : 'Reg xong: Sub2API + reg-only + reg OK nhưng sub2 fail'}">
           <div class="stat-label">Reg OK</div>
           <div class="stat-value">${stats.success ?? '—'}</div>
-          <div class="card-sub" style="margin-top:4px">chỉ reg: ${stats.reg_only ?? 0} · sub2 fail: ${stats.sub2_fail ?? 0}</div>
+          <div class="card-sub" style="margin-top:4px">${isSheetOnly(tool.id) ? `lên sheet ${esc(tool.id)}, không Sub2` : `chỉ reg: ${stats.reg_only ?? 0} · sub2 fail: ${stats.sub2_fail ?? 0}`}</div>
         </div>
+        ${isSheetOnly(tool.id) ? `
+        <div class="stat-card" title="${esc(tool.name)} không import Sub2API">
+          <div class="stat-label">Google Sheet</div>
+          <div class="stat-value">${stats.success ?? '—'}</div>
+          <div class="card-sub" style="margin-top:4px">tab ${esc(tool.id)}</div>
+        </div>` : `
         <div class="stat-card" title="Đã import Sub2API (added_sub2api)">
           <div class="stat-label">Sub2API OK</div>
           <div class="stat-value">${stats.sub2api ?? '—'}</div>
           <div class="card-sub" style="margin-top:4px">trong ${stats.success ?? 0} reg OK</div>
-        </div>
+        </div>`}
         <div class="stat-card bad" title="error* lần status cuối mỗi email">
           <div class="stat-label">Fail</div>
           <div class="stat-value">${stats.fail ?? '—'}</div>
@@ -318,12 +379,12 @@ async function renderRegister(root) {
       </div>
       ${stats.blurb ? `<div class="card-sub" style="margin-top:-6px">${esc(stats.blurb)}</div>` : ''}
 
-      <div class="grid-2">
+      <div class="workspace">
         <div class="card">
           <div class="card-head">
             <div>
-              <div class="card-title">Chạy task</div>
-              <div class="card-sub">Chọn tool → cấu hình → Start. Stop gửi data/STOP (ESC-compatible).</div>
+              <div class="card-title">Cấu hình</div>
+              <div class="card-sub">Chọn tool, mail, số lượng. Stop ghi data/STOP.</div>
             </div>
           </div>
 
@@ -333,7 +394,7 @@ async function renderRegister(root) {
                 const soon = t.status === 'coming_soon';
                 const sel = t.id === tool.id;
                 return `<button type="button" class="tool-tile ${sel ? 'is-selected' : ''} ${soon ? 'is-soon' : ''}" data-tool="${esc(t.id)}" ${soon ? 'disabled' : ''}>
-                  <div class="ico" style="background:color-mix(in srgb, ${esc(t.color)} 18%, transparent);color:${esc(t.color)}">${esc(t.icon)}</div>
+                  ${brandIconHtml(t)}
                   <strong>${esc(t.name)}</strong>
                   <p>${esc(t.description)}</p>
                   <span class="badge ${soon ? 'badge-soon' : 'badge-ready'}" style="margin-top:8px">${soon ? 'Soon' : 'Ready'}</span>
@@ -342,7 +403,7 @@ async function renderRegister(root) {
               .join('')}
           </div>
 
-          <div class="form-stack" id="tool-form">
+          <div class="form-stack form-grid" id="tool-form">
             ${(tool.fields || [])
               .map((f) => {
                 if (f.type === 'select') {
@@ -367,6 +428,14 @@ async function renderRegister(root) {
                   </div>
                   ${f.hint ? `<div class="hint" style="margin-top:-6px">${esc(f.hint)}</div>` : ''}`;
                 }
+                if (f.type === 'textarea') {
+                  return `<div class="field span-2 redeem-box" data-field-wrap="${esc(f.key)}">
+                    <label>${esc(f.label)}</label>
+                    <textarea data-key="${esc(f.key)}" rows="5" placeholder="CANVASPIDERMAN
+MOI_MA_KHAC">${esc(state.form[f.key] ?? f.default ?? '')}</textarea>
+                    ${f.hint ? `<div class="hint">${esc(f.hint)}</div>` : ''}
+                  </div>`;
+                }
                 return `<div class="field" data-field-wrap="${esc(f.key)}" ${f.key === 'count' && isHotmailMail(state.form.mail) ? 'hidden' : ''}>
                   <label>${esc(f.label)}</label>
                   <input type="${f.type === 'number' ? 'number' : 'text'}" data-key="${esc(f.key)}"
@@ -378,35 +447,39 @@ async function renderRegister(root) {
               .join('')}
           </div>
 
-          ${tool.id === 'grok' ? hotmailPanelHtml(state.hotmailPool, isHotmailMail(state.form.mail)) : ''}
+          ${['grok', 'heygen', 'capcut', 'zai', 'canva'].includes(tool.id) ? hotmailPanelHtml(state.hotmailPool, isHotmailMail(state.form.mail)) : ''}
           ${
-            tool.id === 'grok'
+            ['grok', 'heygen', 'capcut', 'zai', 'canva'].includes(tool.id)
               ? `<div class="hotmail-plan" id="hotmail-plan" ${isHotmailMail(state.form.mail) ? '' : 'hidden'}>${hotmailPlanText(state.hotmailPool)}</div>`
               : ''
           }
 
-          <div class="btn-row">
-            <button class="btn btn-primary" id="btn-start" ${running || tool.status !== 'ready' ? 'disabled' : ''}>
-              ▶ Start
-            </button>
-            <button class="btn btn-danger" id="btn-stop" ${!running ? 'disabled' : ''}>
-              ⏹ Stop
-            </button>
-            <button class="btn btn-ghost" id="btn-refresh-stats">↻ Stats</button>
+          ${!isSheetOnly(tool.id) && stats.next_name ? `<div class="card-sub" style="margin-top:12px">Next Sub2API name: <span class="mono">${esc(stats.next_name)}</span> · Hotmail pool: ${stats.hotmails ?? 0}</div>` : ''}
+
+          <div class="btn-row action-row">
+            <button class="btn btn-primary" id="btn-start" ${running || tool.status !== 'ready' ? 'disabled' : ''}>Start</button>
+            ${tool.id === 'canva' ? `<button class="btn btn-ghost" id="btn-start-redeem" ${running || tool.status !== 'ready' ? 'disabled' : ''}>Start redeem</button>` : ''}
+            <button class="btn btn-danger" id="btn-stop" ${!running ? 'disabled' : ''}>Stop</button>
+            <button class="btn btn-ghost" id="btn-refresh-stats">Stats</button>
           </div>
-          ${stats.next_name ? `<div class="card-sub" style="margin-top:12px">Next Sub2API name: <span class="mono">${esc(stats.next_name)}</span> · Hotmail pool: ${stats.hotmails ?? 0}</div>` : ''}
         </div>
 
-        <div class="card">
+        <div class="card console-card">
           <div class="log-head">
-            <div>
-              <div class="card-title">Live log</div>
-              <div class="card-sub" id="job-status-line">${job ? `${esc(job.tool_id)} · ${esc(job.status)}` : 'Chưa có job'}</div>
+            <div style="display:flex;align-items:center;gap:10px;min-width:0">
+              <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <div>
+                <div class="card-title">Live log</div>
+                <div class="card-sub" id="job-status-line">${job ? `${esc(job.tool_id)} · ${esc(job.status)}` : 'Chưa có job'}</div>
+              </div>
             </div>
-            <label class="check-row" style="padding:6px 10px;margin:0">
-              <input type="checkbox" id="auto-scroll" ${state.autoScroll ? 'checked' : ''} />
-              <span style="font-size:12px">Auto-scroll</span>
-            </label>
+            <div class="log-actions">
+              <label class="check-row" style="padding:6px 10px;margin:0">
+                <input type="checkbox" id="auto-scroll" ${state.autoScroll ? 'checked' : ''} />
+                <span style="font-size:12px">Auto-scroll</span>
+              </label>
+              <button class="btn btn-ghost" id="btn-copy-log" type="button">Copy log</button>
+            </div>
           </div>
           <div class="log-console" id="log-box"></div>
         </div>
@@ -414,7 +487,9 @@ async function renderRegister(root) {
     </div>
   `;
 
-  paintLogs(document.getElementById('log-box'), job?.logs || []);
+  const liveBox = document.getElementById('log-box');
+  bindLogBox(liveBox);
+  paintLogs(liveBox, job?.logs || []);
 
   root.querySelectorAll('[data-tool]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -431,15 +506,31 @@ async function renderRegister(root) {
       else if (el.type === 'number') state.form[key] = el.value === '' ? 0 : Number(el.value);
       else state.form[key] = el.value;
       if (key === 'mail') syncHotmailUi(root);
+      if (key === 'job') syncCanvaJobUi(root);
     };
     el.addEventListener('change', sync);
     el.addEventListener('input', sync);
   });
   bindHotmailPanel(root, tool.id);
   syncHotmailUi(root);
+  syncCanvaJobUi(root);
 
   document.getElementById('auto-scroll')?.addEventListener('change', (e) => {
-    state.autoScroll = e.target.checked;
+    setAutoScroll(e.target.checked, { scrollBox: document.getElementById('log-box') });
+  });
+  document.getElementById('btn-copy-log')?.addEventListener('click', async () => {
+    try {
+      await copyLogBox(document.getElementById('log-box'));
+    } catch {
+      toast('Copy thất bại', 'err');
+    }
+  });
+
+  document.getElementById('btn-start-redeem')?.addEventListener('click', () => {
+    const sel = root.querySelector('[data-key="job"]');
+    if (sel) sel.value = 'redeem';
+    state.form.job = 'redeem';
+    document.getElementById('btn-start')?.click();
   });
 
   document.getElementById('btn-start')?.addEventListener('click', async () => {
@@ -451,7 +542,13 @@ async function renderRegister(root) {
         else if (el.type === 'number') state.form[key] = Number(el.value);
         else state.form[key] = el.value;
       });
-      if (isHotmailMail(state.form.mail)) {
+      if (state.form.job === 'redeem') {
+        const raw = String(state.form.codes || '').trim();
+        if (!raw) {
+          toast('Dán mã redeem vào ô Mã redeem (mỗi dòng 1 mã)', 'err');
+          return;
+        }
+      } else if (isHotmailMail(state.form.mail)) {
         try {
           state.hotmailPool = await getHotmails(state.selectedTool);
         } catch (_) {}
@@ -469,6 +566,7 @@ async function renderRegister(root) {
       toast('Đã Start job', 'ok');
       updateRunPill(state.job);
       await renderRegister(root);
+      revealLiveLog();
     } catch (err) {
       toast(err.message || String(err), 'err');
     }
@@ -478,6 +576,7 @@ async function renderRegister(root) {
     try {
       const res = await stopJob(state.job?.id || null);
       toast(res.message || 'Đang dừng…', 'ok');
+      revealLiveLog();
     } catch (err) {
       toast(err.message || String(err), 'err');
     }
@@ -486,17 +585,161 @@ async function renderRegister(root) {
   document.getElementById('btn-refresh-stats')?.addEventListener('click', async () => {
     await renderRegister(root);
     toast('Đã refresh stats', 'ok');
+    revealLiveLog();
   });
+}
+
+function selectionIn(el) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+  const node = sel.anchorNode;
+  return !!(node && el.contains(node));
+}
+
+function makeLogLine(text) {
+  const div = document.createElement('div');
+  div.className = `line ${lineClass(text)}`;
+  div.textContent = text;
+  return div;
+}
+
+function logBoxText(box) {
+  if (!box) return '';
+  return [...box.querySelectorAll('.line')].map((el) => el.textContent).join('\n');
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch (_) {
+    /* fall through */
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  ta.remove();
+}
+
+function isLogAtBottom(box, slop = 48) {
+  if (!box) return true;
+  return box.scrollHeight - box.scrollTop - box.clientHeight < slop;
+}
+
+function setAutoScroll(on, { scrollBox } = {}) {
+  state.autoScroll = !!on;
+  const cb = document.getElementById('auto-scroll');
+  if (cb && cb.checked !== state.autoScroll) cb.checked = state.autoScroll;
+  if (state.autoScroll && scrollBox) scrollBox.scrollTop = scrollBox.scrollHeight;
 }
 
 function paintLogs(box, lines) {
   if (!box) return;
-  const atBottom =
-    box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.innerHTML = (lines || [])
-    .map((l) => `<div class="line ${lineClass(l)}">${esc(l)}</div>`)
-    .join('');
-  if (state.autoScroll || atBottom) box.scrollTop = box.scrollHeight;
+  const next = Array.isArray(lines) ? lines : [];
+  const selecting = selectionIn(box);
+  // Keep streaming while the user is selecting/copying. Only skip a full
+  // rewrite — that would wipe the highlight and look like the log "stopped".
+  const pin =
+    !selecting &&
+    !box.dataset.holdScroll &&
+    (state.autoScroll || isLogAtBottom(box));
+  const kids = box.children;
+  const prevN = kids.length;
+  const canAppend =
+    prevN > 0 &&
+    next.length >= prevN &&
+    kids[0].textContent === next[0] &&
+    kids[prevN - 1].textContent === next[prevN - 1];
+
+  if (canAppend) {
+    if (next.length === prevN) return;
+    const frag = document.createDocumentFragment();
+    for (let i = prevN; i < next.length; i++) frag.appendChild(makeLogLine(next[i]));
+    box.appendChild(frag);
+  } else {
+    if (selecting) return;
+    const frag = document.createDocumentFragment();
+    next.forEach((l) => frag.appendChild(makeLogLine(l)));
+    box.replaceChildren(frag);
+  }
+  if (pin) box.scrollTop = box.scrollHeight;
+}
+
+function bindLogBox(box) {
+  if (!box || box.dataset.copyBound) return;
+  box.dataset.copyBound = '1';
+  box.setAttribute('tabindex', '0');
+  box.setAttribute('role', 'log');
+  box.setAttribute('aria-label', 'Live log — bôi chọn để copy');
+  box.addEventListener('keydown', (e) => {
+    const key = String(e.key).toLowerCase();
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (key === 'a') {
+      e.preventDefault();
+      e.stopPropagation();
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    if (key === 'c') {
+      // Copy only — never treat Ctrl+C in the log as Stop.
+      e.stopPropagation();
+      const sel = window.getSelection();
+      const picked =
+        sel && !sel.isCollapsed && box.contains(sel.anchorNode)
+          ? sel.toString()
+          : '';
+      if (picked) return;
+      e.preventDefault();
+      copyLogBox(box).catch(() => toast('Copy thất bại', 'err'));
+    }
+  });
+  box.addEventListener('copy', (e) => {
+    e.stopPropagation();
+  });
+  box.addEventListener('pointerdown', (e) => {
+    box.dataset.holdScroll = '1';
+    try {
+      box.setPointerCapture(e.pointerId);
+    } catch (_) {
+      /* ignore */
+    }
+  });
+  const release = () => {
+    delete box.dataset.holdScroll;
+    setAutoScroll(isLogAtBottom(box));
+  };
+  box.addEventListener('pointerup', release);
+  box.addEventListener('pointercancel', release);
+  box.addEventListener(
+    'wheel',
+    () => {
+      requestAnimationFrame(() => setAutoScroll(isLogAtBottom(box)));
+    },
+    { passive: true },
+  );
+  box.addEventListener(
+    'scroll',
+    () => {
+      setAutoScroll(isLogAtBottom(box));
+    },
+    { passive: true },
+  );
+}
+
+async function copyLogBox(box) {
+  const text = logBoxText(box);
+  await copyToClipboard(text);
+  const n = text ? text.split('\n').length : 0;
+  toast(n ? `Đã copy ${n} dòng log` : 'Log trống', n ? 'ok' : 'err');
 }
 
 async function renderResults(root) {
@@ -518,8 +761,8 @@ async function renderResults(root) {
         <div class="stat-card info"><div class="stat-label">Email unique</div><div class="stat-value">${stats.unique_emails ?? stats.total ?? 0}</div>
           <div class="card-sub" style="margin-top:4px">${stats.attempts ?? 0} lượt thử</div></div>
         <div class="stat-card ok"><div class="stat-label">Reg OK</div><div class="stat-value">${stats.success ?? 0}</div>
-          <div class="card-sub" style="margin-top:4px">reg-only ${stats.reg_only ?? 0} · sub2 fail ${stats.sub2_fail ?? 0}</div></div>
-        <div class="stat-card"><div class="stat-label">Sub2API OK</div><div class="stat-value">${stats.sub2api ?? 0}</div></div>
+          <div class="card-sub" style="margin-top:4px">${isSheetOnly(toolId) ? 'không Sub2 — chỉ sheet' : `reg-only ${stats.reg_only ?? 0} · sub2 fail ${stats.sub2_fail ?? 0}`}</div></div>
+        <div class="stat-card"><div class="stat-label">${isSheetOnly(toolId) ? `Sheet ${esc(toolId)}` : 'Sub2API OK'}</div><div class="stat-value">${isSheetOnly(toolId) ? (stats.success ?? 0) : (stats.sub2api ?? 0)}</div></div>
         <div class="stat-card bad"><div class="stat-label">Fail</div><div class="stat-value">${stats.fail ?? 0}</div>
           <div class="card-sub" style="margin-top:4px">pending ${stats.pending ?? 0}</div></div>
       </div>
@@ -583,7 +826,12 @@ async function renderLogs(root) {
             <div class="card-sub" id="job-status-line">${job ? `${esc(job.tool_id)} · ${esc(job.status)} · id ${esc(job.id || '')}` : 'Idle'}</div>
           </div>
           <div class="btn-row" style="margin:0">
+            <label class="check-row" style="padding:6px 10px;margin:0">
+              <input type="checkbox" id="auto-scroll" ${state.autoScroll ? 'checked' : ''} />
+              <span style="font-size:12px">Auto-scroll</span>
+            </label>
             <button class="btn btn-danger" id="btn-stop-log">⏹ Stop</button>
+            <button class="btn btn-ghost" id="btn-copy-log" type="button">Copy log</button>
             <button class="btn btn-ghost" id="btn-clear-view">Clear view</button>
           </div>
         </div>
@@ -591,7 +839,19 @@ async function renderLogs(root) {
       </div>
     </div>
   `;
-  paintLogs(document.getElementById('log-box'), job?.logs || []);
+  const fullBox = document.getElementById('log-box');
+  bindLogBox(fullBox);
+  paintLogs(fullBox, job?.logs || []);
+  document.getElementById('auto-scroll')?.addEventListener('change', (e) => {
+    setAutoScroll(e.target.checked, { scrollBox: document.getElementById('log-box') });
+  });
+  document.getElementById('btn-copy-log')?.addEventListener('click', async () => {
+    try {
+      await copyLogBox(document.getElementById('log-box'));
+    } catch {
+      toast('Copy thất bại', 'err');
+    }
+  });
   document.getElementById('btn-stop-log')?.addEventListener('click', async () => {
     try {
       await stopJob();
@@ -677,7 +937,7 @@ async function renderTools(root) {
             .map((t) => {
               const soon = t.status === 'coming_soon';
               return `<div class="tool-tile ${soon ? 'is-soon' : ''}" style="cursor:default">
-                <div class="ico">${esc(t.icon)}</div>
+                ${brandIconHtml(t)}
                 <strong>${esc(t.name)}</strong>
                 <p>${esc(t.description)}</p>
                 <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
