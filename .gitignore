@@ -12,6 +12,8 @@ capcut/**/STOP
 !/.gitignore
 !/README.md
 !/LICENSE
+!/.github/
+!/.github/**
 
 # Inside grok_tool — secrets / personal / runtime
 grok_tool/config.json

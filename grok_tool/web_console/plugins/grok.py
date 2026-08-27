@@ -30,7 +30,29 @@ class GrokToolPlugin(BaseToolPlugin):
                     FieldOption("1", "Hotmail", "1 acc → tối đa 5 Grok (mail / mail+1 … +4)"),
                     FieldOption("2", "Temp azpop only", ""),
                     FieldOption("3", "Temp tmail.wibu only", ""),
+                    FieldOption("5", "Domain riêng", "random@domain — forward về Hotmail pool"),
                 ],
+            ),
+            ToolField(
+                key="custom_domain",
+                label="Domain riêng",
+                type="select",
+                default="nguyenquan.dpdns.org",
+                options=[
+                    FieldOption("nguyenquan.dpdns.org", "nguyenquan.dpdns.org", "Cloudflare Email Routing — khuyên"),
+                    FieldOption("quan2712.dedyn.io", "quan2712.dedyn.io", "ImprovMX"),
+                ],
+                hint="Mail random@domain được forward về Hotmail trong pool — đọc OTP qua Graph",
+            ),
+            ToolField(
+                key="custom_read_mailbox",
+                label="Hotmail đọc OTP",
+                type="select",
+                default="auto",
+                options=[
+                    FieldOption("auto", "Tự động — đầu pool", "mặc định"),
+                ],
+                hint="Mail domain riêng forward về 1 Hotmail CỐ ĐỊNH — chọn đúng acc đó trong pool để đọc OTP. Không thấy? Thêm vào data/hotmails.txt (có refresh_token) trước.",
             ),
             ToolField(
                 key="count",
@@ -67,6 +89,16 @@ class GrokToolPlugin(BaseToolPlugin):
                 default=True,
                 hint="Cửa sổ reg chạy ngoài màn hình, không nhảy ra trước mặt",
             ),
+            ToolField(
+                key="threads",
+                label="Luồng song song",
+                type="select",
+                default="1",
+                options=[
+                    FieldOption("1", "1 luồng", "tuần tự — an toàn nhất"),
+                    FieldOption("2", "2 luồng", "2 acc cùng lúc — chỉ backend HTTP (github/protocol), batch số lượng cố định"),
+                ],
+            ),
         ],
     )
 
@@ -74,6 +106,11 @@ class GrokToolPlugin(BaseToolPlugin):
         from grokreg.core import winhide
 
         return winhide.hidden_python(root)
+
+    def proxy_config_path(self, root: Path) -> Path:
+        # grokreg đọc key "proxy" từ config.json của grok_tool (browser qua
+        # --proxy-server, protocol/github qua worker bridge config→settings).
+        return Path(root) / "config.json"
 
     @staticmethod
     def _is_hotmail_mail(mail: str) -> bool:
@@ -108,6 +145,20 @@ class GrokToolPlugin(BaseToolPlugin):
         py = self._py(root)
         if not py.exists():
             raise RuntimeError(f"Python venv not found: {py}")
+        if str(params.get("mail") or "") == "5":
+            mb = str(params.get("custom_read_mailbox") or "").strip()
+            if mb and mb.lower() != "auto":
+                try:
+                    cfg_path = Path(root) / "config.json"
+                    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+                    if str(raw.get("custom_read_mailbox") or "") != mb:
+                        raw["custom_read_mailbox"] = mb
+                        cfg_path.write_text(
+                            json.dumps(raw, indent=1, ensure_ascii=False) + "\n",
+                            encoding="utf-8",
+                        )
+                except Exception:
+                    pass
         mail = str(params.get("mail") or "0")
         if self._is_hotmail_mail(mail):
             pool = self.hotmail_pool(root)
@@ -122,6 +173,7 @@ class GrokToolPlugin(BaseToolPlugin):
         if backend not in ("github", "protocol", "auto", "browser"):
             backend = "github"
         # Protocol/GitHub + temp mail: azpop nhận được OTP xAI, tmail thì không.
+        # Domain riêng ("5") giữ nguyên — OTP đọc qua Hotmail pool (mail_api).
         if backend in (
             "github",
             "protocol",
@@ -129,7 +181,7 @@ class GrokToolPlugin(BaseToolPlugin):
             "http",
             "pure_http",
             "castle",
-        ) and not self._is_hotmail_mail(mail):
+        ) and not self._is_hotmail_mail(mail) and mail != "5":
             mail = "2"
         return [
             str(py),
@@ -140,7 +192,8 @@ class GrokToolPlugin(BaseToolPlugin):
             str(count),
             "--backend",
             backend,
-        ]
+        ] + (["--custom-domain", str(params.get("custom_domain") or "nguyenquan.dpdns.org").strip().lstrip("@")]
+             if mail == "5" else [])
 
     def cwd(self, root: Path) -> Path:
         return root
@@ -159,6 +212,9 @@ class GrokToolPlugin(BaseToolPlugin):
             env["GROK_NO_FOCUS"] = "0"
         else:
             env["GROK_NO_FOCUS"] = "1"
+        th = str(params.get("threads") or "1").strip()
+        if th in ("2", "3", "4"):
+            env["GROK_THREADS"] = th
         return env
 
     def stop_signal(self, root: Path) -> None:

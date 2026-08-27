@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chọn avatar rồng · Reg Plane</title>
+<style>
+  :root {
+    --blue-1: #3b82f6; --blue-2: #1e40af;
+    --bg: #f8fafc; --card: #ffffff; --text: #0f172a; --muted: #475569; --border: rgba(15,23,42,.1);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); padding: 32px 24px 60px;
+  }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 18px; max-width: 1200px; margin: 0 auto;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 18px; display: flex; flex-direction: column; gap: 14px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 6px 16px rgba(15,23,42,.04);
+  }
+  .card .num {
+    font-size: 12px; font-weight: 700; color: #2563eb; letter-spacing: .06em;
+  }
+  .row { display: flex; align-items: center; gap: 14px; }
+  .box {
+    border-radius: 10px; flex: none;
+    background: linear-gradient(145deg, var(--blue-1), var(--blue-2));
+    display: grid; place-items: center; color: #eff6ff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 0 0 1px rgba(59,130,246,.25);
+    overflow: hidden;
+  }
+  .big { width: 86px; height: 86px; border-radius: 20px; }
+  .big svg { width: 64px; height: 64px; display: block; }
+  .mini { width: 36px; height: 36px; }
+  .mini svg { width: 26px; height: 26px; display: block; }
+  .mock { display: flex; align-items: center; gap: 12px; }
+  .mock strong { font-size: 14px; display: block; }
+  .mock span { font-size: 11px; color: var(--muted); display: block; }
+  .name { font-size: 13px; color: var(--muted); }
+  /* Game Icons: path đầu là nền đen → ẩn; path còn lại tô trắng */
+  .gi svg path:first-child { display: none; }
+  .gi svg path { fill: currentColor; }
+  footer {
+    max-width: 1200px; margin: 32px auto 0; font-size: 12px; color: var(--muted); line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+  <h1>🐉 Chọn avatar rồng cho Reg Plane</h1>
+  <p class="sub">Bên trái mỗi thẻ: preview lớn 86px · bên phải: đúng kích thước thật 36px cạnh chữ như sidebar. Chọn số rồi báo ZCode là áp dụng ngay (kể cả favicon).</p>
+
+  <div class="grid">
+    <div class="card"><div class="num">#1</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/lorc-dragon-head.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/lorc-dragon-head.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Đầu rồng cổ điển — Lorc (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#2</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/faithtoken-dragon-head.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/faithtoken-dragon-head.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Đầu rồng chi tiết, dữ dội — Faithtoken (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#3</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/delapouite-spiked-dragon-head.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/delapouite-spiked-dragon-head.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Đầu rồng gai nhọn — Delapouite (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#4</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/lorc-dragon-spiral.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/lorc-dragon-spiral.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Rồng cuộn phong Á Đông — Lorc (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#5</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/lorc-double-dragon.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/lorc-double-dragon.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Song rồng đối xứng kiểu thái cực — Lorc (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#6</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/lorc-dragon-breath.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/lorc-dragon-breath.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Rồng phun lửa — Lorc (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#7</div>
+      <div class="row">
+        <div class="box big gi"><img src="/static/img/avatars/delapouite-dragon-shield.svg" /></div>
+        <div class="mock"><div class="box mini gi"><img src="/static/img/avatars/delapouite-dragon-shield.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Rồng trong khiên — Delapouite (Game Icons)</div>
+    </div>
+
+    <div class="card"><div class="num">#8</div>
+      <div class="row">
+        <div class="box big"><img src="/static/img/avatars/twemoji-dragon.svg" /></div>
+        <div class="mock"><div class="box mini"><img src="/static/img/avatars/twemoji-dragon.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Rồng emoji xanh 🐉 màu gốc — Twemoji</div>
+    </div>
+
+    <div class="card"><div class="num">#9</div>
+      <div class="row">
+        <div class="box big"><img src="/static/img/avatars/noto-dragon.svg" /></div>
+        <div class="mock"><div class="box mini"><img src="/static/img/avatars/noto-dragon.svg" /></div>
+          <div><strong>Reg Plane</strong><span>Control plane</span></div></div>
+      </div>
+      <div class="name">Rồng emoji chi tiết 🐉 màu gốc — Noto Emoji</div>
+    </div>
+  </div>
+
+  <footer>
+    Nguồn icon: Game Icons (CC BY 3.0 — Lorc, Delapouite, Faithtoken) · Twemoji (CC-BY 4.0 graphics) · Noto Emoji (OFL/Apache).
+    Bản màu (#8, #9) giữ nguyên màu gốc; bản Game Icons (#1–#7) sẽ được tô trắng trên nền gradient xanh như preview.
+  </footer>
+</body>
+</html>

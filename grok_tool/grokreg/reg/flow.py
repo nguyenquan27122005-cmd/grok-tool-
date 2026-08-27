@@ -76,12 +76,13 @@ from grokreg.browser.page_flow import (  # noqa: F401
 
 def _normalize_email_provider(name: str) -> str:
     """
-    Return: hotmail | azpopmail | tmail_wibu | auto_temp | mailtm | auto
+    Return: hotmail | azpopmail | tmail_wibu | auto_temp | mailtm | auto | custom_domain
       azpopmail  = https://azpopmail.com/document only
       tmail_wibu = https://tmail.wibucrypto.pro only
       auto_temp  = pick healthier of azpop/wibu; lag → switch next run
       mailtm     = legacy Mail.tm
       auto       = hotmail if pool usable, else auto_temp
+      custom_domain = random@<domain riêng> — mail forward về Hotmail, đọc qua Graph
     """
     n = (name or "hotmail").lower().strip().replace(" ", "")
     if n in ("auto_temp", "temp", "tempmail", "temporary", "failover", "smart_temp"):
@@ -104,6 +105,8 @@ def _normalize_email_provider(name: str) -> str:
         return "tmail_wibu"
     if n in ("mailtm", "mail.tm"):
         return "mailtm"
+    if n in ("custom_domain", "customdomain", "domain_rieng", "domain", "rieng", "own_domain", "5"):
+        return "custom_domain"
     log.warning("Unknown email_provider=%r — using auto_temp", name)
     return "auto_temp"
 
@@ -211,6 +214,49 @@ def acquire_email_session(
             _create_temp_session("tmail_wibu", azpop, tmail_wibu, config),
             _hotmail_handle(),
         )
+
+    if mode == "custom_domain":
+        domain = str(config.get("custom_domain") or "").strip().lstrip("@").lower()
+        if not domain or "@" in domain or "." not in domain:
+            raise RuntimeError(
+                f"custom_domain thiếu/không hợp lệ (config custom_domain): {domain!r}"
+            )
+        # Mail gửi tới random@domain được Cloudflare/ImprovMX forward về 1
+        # Hotmail cố định — mượn acc trong pool để đọc OTP qua Graph.
+        # KHÔNG tiêu alias: provider custom_domain không đi qua mark_used().
+        hotmail = HotmailProvider.from_config(list_path, config)
+        read_mb = str(config.get("custom_read_mailbox") or "").strip().lower()
+        if read_mb and read_mb != "auto":
+            base = hotmail.acquire_mailbox(
+                read_mb, default_client_id=default_cid
+            )
+            log.info(
+                "custom_domain read mailbox (cấu hình): %s", base.mailbox
+            )
+        else:
+            base = hotmail.acquire(default_client_id=default_cid)
+        username = random_string(10).lower()
+        address = f"{username}@{domain}"
+        session = EmailSession(
+            address=address,
+            password=base.password,
+            provider="custom_domain",
+            refresh_token=base.refresh_token,
+            client_id=base.client_id,
+            mailbox=base.mailbox,
+            extra={
+                "domain": domain,
+                "read_mailbox": base.mailbox,
+                "read_refresh_token": base.refresh_token,
+                "read_client_id": base.client_id,
+            },
+        )
+        log.info(
+            "custom_domain ready: %s (OTP đọc qua Hotmail %s)",
+            address,
+            base.mailbox,
+        )
+        return session, hotmail
 
     if mode == "auto_temp":
         which = tmr.pick_temp_provider(
@@ -780,6 +826,20 @@ async def register_one(config: dict[str, Any]) -> None:
                         if hotmail:
                             hotmail.mark_used(email_session)
                         return
+                    # Trang đã tiến qua bước email form (otp/password/name…)
+                    # thì các "alert:" chỉ là helper text của bước sau — ví dụ
+                    # "Didn't receive a code? Resend (30)" trên trang OTP nghĩa
+                    # là email ĐÃ được chấp nhận, mã đang gửi. Không phải lỗi.
+                    if (
+                        last_page_err.startswith("alert:")
+                        and last_step not in ("", "unknown", "landing", "email_form")
+                    ):
+                        log.info(
+                            "Bỏ qua %r — step=%s đã qua email form, đây là UI text của bước kế tiếp",
+                            last_page_err[:90],
+                            last_step,
+                        )
+                        last_page_err = None
                     # Fatal page errors → mail will never arrive (AUTO-FIX retries below)
                     if (
                         last_page_err.startswith("error_generic")
@@ -1817,6 +1877,175 @@ Get-CimInstance Win32_Process -Filter \\"Name='chrome.exe'\\" | Where-Object {{
                         user_id=user_id,
                         sso_token=sso_tok,
                     )
+                    # Reg xong → hỏi ngay gói/tier trên grok.com đã login
+                    # (ưu đãi nếu có: quota cao bất thường so với free)
+                    # NOTE: logger "grok-reg" bị quiet_technical_logs() hạ
+                    # xuống ERROR — báo kết quả qua slog (kênh user-facing).
+                    try:
+                        pblob = ""
+                        r_status = 0
+                        total_q = 0
+                        remain_q = -1
+                        js_err = ""
+                        # Đường chính: revive/navigate về grok.com rồi gọi
+                        # API same-origin trong page (context Chrome vượt CF).
+                        # sync-XHR bị trang chặn (NetworkError) → dùng async
+                        # fetch + bắt pydoll await promise.
+                        try:
+                            await tab.go_to("https://grok.com/")
+                            # chờ Cloudflare managed challenge tự giải (nếu có)
+                            for _ in range(4):
+                                await asyncio.sleep(3.0)
+                                try:
+                                    ttl = str(
+                                        await _exec_js(tab, "document.title")
+                                        or ""
+                                    ).lower()
+                                except Exception:
+                                    ttl = ""
+                                if (
+                                    "just a moment" not in ttl
+                                    and "attention required" not in ttl
+                                ):
+                                    break
+                            plan_fetch_js = r"""
+                            (async () => {
+                              try {
+                                const r = await fetch('https://grok.com/rest/rate-limits', {
+                                  method: 'POST',
+                                  credentials: 'include',
+                                  headers: {'Content-Type': 'application/json'},
+                                  body: JSON.stringify({requestKind: 'DEFAULT', modelName: 'grok-4'})
+                                });
+                                const t = await r.text();
+                                return JSON.stringify({http: r.status, body: String(t).slice(0, 400)});
+                              } catch (e) {
+                                return JSON.stringify({error: String(e).slice(0, 120)});
+                              }
+                            })()
+                            """
+                            try:
+                                raw = _unwrap_js_result(
+                                    await tab.execute_script(
+                                        plan_fetch_js,
+                                        return_by_value=True,
+                                        await_promise=True,
+                                    )
+                                )
+                            except Exception:
+                                raw = None
+                            if not isinstance(raw, str) or not raw.strip().startswith(
+                                "{"
+                            ):
+                                raw = await _exec_js(tab, plan_fetch_js)
+                            if isinstance(raw, str) and raw.strip().startswith("{"):
+                                pdata = json.loads(raw)
+                                js_err = str(pdata.get("error") or "")
+                                r_status = int(pdata.get("http") or 0)
+                                pblob = str(pdata.get("body") or "")
+                            m_total = re.search(r'"totalQueries"\s*:\s*(\d+)', pblob)
+                            m_rem = re.search(r'"remainingQueries"\s*:\s*(\d+)', pblob)
+                            total_q = int(m_total.group(1)) if m_total else 0
+                            remain_q = int(m_rem.group(1)) if m_rem else -1
+                        except Exception as e:
+                            log.debug("[offer] js route fail: %s", e)
+                        # Dự phòng: requests cùng cookie CDP (thường bị CF 403)
+                        if total_q <= 0:
+                            try:
+                                from grokreg.delivery.sso_capture import (
+                                    _cdp_get_cookies,
+                                )
+
+                                cjar = await _cdp_get_cookies(tab)
+                                s = requests.Session()
+                                for c in cjar or []:
+                                    try:
+                                        s.cookies.set(
+                                            str(c.get("name")),
+                                            str(c.get("value")),
+                                            domain=str(
+                                                c.get("domain") or ".grok.com"
+                                            ),
+                                        )
+                                    except Exception:
+                                        continue
+                                r = s.post(
+                                    "https://grok.com/rest/rate-limits",
+                                    json={
+                                        "requestKind": "DEFAULT",
+                                        "modelName": "grok-4",
+                                    },
+                                    headers={
+                                        "User-Agent": (
+                                            str(config.get("user_agent"))
+                                            or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                            "Chrome/131.0.0.0 Safari/537.36"
+                                        ),
+                                        "Content-Type": "application/json",
+                                        "Origin": "https://grok.com",
+                                        "Referer": "https://grok.com/",
+                                        "Accept": "*/*",
+                                    },
+                                    timeout=25,
+                                )
+                                r_status = r.status_code
+                                pblob = (r.text or "")[:400]
+                                m_total = re.search(
+                                    r'"totalQueries"\s*:\s*(\d+)', pblob
+                                )
+                                m_rem = re.search(
+                                    r'"remainingQueries"\s*:\s*(\d+)', pblob
+                                )
+                                total_q = int(m_total.group(1)) if m_total else 0
+                                remain_q = (
+                                    int(m_rem.group(1)) if m_rem else remain_q
+                                )
+                            except Exception as e:
+                                log.debug("[offer] http route fail: %s", e)
+                        tier = ""
+                        offer_summary = ""
+                        if total_q > 0:
+                            tier = (
+                                "premium"
+                                if total_q >= 50
+                                else ("standard" if total_q >= 20 else "free")
+                            )
+                            offer_summary = (
+                                f"{tier}:quota={remain_q}/{total_q}"
+                                if remain_q >= 0
+                                else f"{tier}:total={total_q}"
+                            )
+                        elif r_status == 403 or "just a moment" in pblob.lower():
+                            offer_summary = f"cloudflare_{r_status}"
+                        elif js_err:
+                            offer_summary = f"js_error:{js_err[:60]}"
+                        else:
+                            offer_summary = f"unknown:http={r_status}"
+                        # Luôn lưu raw để chẩn đoán + hiển thị trên console
+                        try:
+                            (ROOT / "data" / "grok_last_offer.json").write_text(
+                                json.dumps(
+                                    {
+                                        "email": email_session.address,
+                                        "summary": offer_summary,
+                                        "tier": tier,
+                                        "total": total_q,
+                                        "remaining": remain_q,
+                                        "raw": pblob[:400],
+                                        "ts": time.strftime(
+                                            "%Y-%m-%d %H:%M:%S"
+                                        ),
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                                encoding="utf-8",
+                            )
+                        except Exception:
+                            pass
+                        slog.api_ok(f"[offer] grok.com → {offer_summary}")
+                    except Exception as e:
+                        slog.api_err(f"[offer] grok plan probe fail: {e}")
                 else:
                     # still mark success if complete form passed, but flag session
                     status = "success_not_logged_in"

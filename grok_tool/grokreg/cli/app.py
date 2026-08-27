@@ -58,6 +58,12 @@ from grokreg.core.config import load_config
 from grokreg.core.cleanup import kill_old_runs
 from grokreg.reg.flow import register_one
 
+# Lỗi tạm thời được retry ngay 1 lần trong vòng lặp reg (email/session mới)
+_TRANSIENT_RE = re.compile(
+    r"timeout|network|connection|temporarily|reset|ssl|429|rate[ _-]?limit|try_later",
+    re.I,
+)
+
 def parse_provider_choice(raw: str | None) -> Optional[str]:
     """Map user input → provider mode | None."""
     if raw is None:
@@ -81,6 +87,8 @@ def parse_provider_choice(raw: str | None) -> Optional[str]:
         return "tmail_wibu"
     if s in ("4", "mailtm", "mail.tm", "m"):
         return "mailtm"
+    if s in ("5", "custom_domain", "customdomain", "domain", "rieng", "custom"):
+        return "custom_domain"
     return None
 
 
@@ -108,6 +116,7 @@ def pick_email_provider(cli_choice: str | None = None) -> str:
     print("  1) Hotmail     (hotmails.txt)")
     print("  2) Temp only   azpopmail.com")
     print("  3) Temp only   tmail.wibucrypto.pro")
+    print("  5) Domain riêng (random@domain — forward về Hotmail pool)")
     print("=" * 52)
     labels = {
         "auto_temp": "Temp smart (azpop↔wibu failover)",
@@ -115,6 +124,7 @@ def pick_email_provider(cli_choice: str | None = None) -> str:
         "azpopmail": "Temp only azpopmail.com",
         "tmail_wibu": "Temp only tmail.wibucrypto.pro",
         "mailtm": "Mail.tm",
+        "custom_domain": "Domain riêng (forward về Hotmail pool)",
     }
     while True:
         try:
@@ -126,7 +136,7 @@ def pick_email_provider(cli_choice: str | None = None) -> str:
         if chosen in labels:
             print(f"→ Dùng {labels[chosen]}\n")
             return chosen
-        print("  Chỉ nhập 0, 1, 2 hoặc 3.")
+        print("  Chỉ nhập 0, 1, 2, 3 hoặc 5.")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -170,6 +180,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "| protocol=HTTP + Castle (Chrome mint) | auto=github rồi fallback Chrome"
         ),
     )
+    p.add_argument(
+        "--custom-domain",
+        dest="custom_domain",
+        default=None,
+        help="Domain riêng khi email_provider=custom_domain (VD nguyenquan.dpdns.org)",
+    )
     return p
 
 
@@ -188,6 +204,13 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
     config = load_config()
     # User choice always wins — ignore config auto
     config["email_provider"] = provider
+    if provider == "custom_domain":
+        domain = str(getattr(args, "custom_domain", None) or "").strip().lstrip("@")
+        if not domain or "@" in domain or "." not in domain:
+            raise SystemExit(
+                "custom_domain cần --custom-domain <domain> (VD --custom-domain nguyenquan.dpdns.org)"
+            )
+        config["custom_domain"] = domain
     # reg_backend: browser (default) | protocol | auto
     # CLI override: --backend protocol
     if getattr(args, "backend", None):
@@ -252,6 +275,16 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
     dmin = float(config.get("inter_success_delay_min") or 45)
     dmax = float(config.get("inter_success_delay_max") or 90)
     threads = max(1, int(os.environ.get("GROK_THREADS") or config.get("threads") or 1))
+    if threads >= 2:
+        _bk = str(
+            config.get("reg_backend") or (config.get("protocol") or {}).get("mode") or "browser"
+        ).strip().lower()
+        if until_stop:
+            log.warning("Chế độ ∞ chỉ chạy 1 luồng — bỏ GROK_THREADS")
+            threads = 1
+        elif _bk in ("browser", "auto", "gpm"):
+            log.warning("Backend %s (Chrome) chưa song song được — chạy 1 luồng", _bk)
+            threads = 1
 
     stop_file = ROOT / "data" / "STOP"
 
@@ -276,40 +309,10 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
             "Chạy liên tục đến khi ESC / Ctrl+C / data/STOP",
         )
 
-    ok_n = 0
-    i = 0
-    try:
-        while True:
-            if is_stop_requested():
-                slog.api_info(
-                    "🛑",
-                    f"Dừng theo lệnh ({stop_reason() or 'STOP'}) — {i} lượt, ok={ok_n}",
-                )
-                break
-
-            i += 1
-            if not until_stop and i > batch:
-                break
-            # STOP file / ESC between accounts
-            if is_stop_requested() or stop_file.exists():
-                slog.api_info(
-                    "🛑",
-                    f"Gặp STOP/ESC — dừng sau {i - 1} lượt (ok={ok_n})",
-                )
-                try:
-                    if stop_file.exists():
-                        stop_file.unlink()
-                except Exception:
-                    pass
-                break
-
-            total_disp = 999 if until_stop else batch
-            log.info(
-                "======== ACCOUNT %s / %s ========",
-                i,
-                "∞" if until_stop else batch,
-            )
-            slog.set_task(task_id=i, cur=i, total=total_disp)
+    async def _run_account() -> str:
+        """Một account: dispatch backend (github/protocol/auto/browser) + retry tạm thời."""
+        status = ""
+        for _attempt in (1, 2):
             try:
                 raise_if_stop()
                 backend = str(
@@ -376,6 +379,103 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
                 log.exception("register_one crashed: %s", e)
                 slog.api_err(f"register_one crashed: {e}")
                 status = f"error:{e}"
+
+            _st_pre = str(status or "")
+            if (
+                _attempt == 1
+                and _st_pre.startswith("error:")
+                and _TRANSIENT_RE.search(_st_pre)
+                and int(config.get("retry_transient") or 1)
+                and not is_stop_requested()
+            ):
+                slog.api_info("↩️", f"Lỗi tạm thời ({_st_pre}) — thử lại ngay 1 lần")
+                continue
+            break
+        return str(status or "")
+
+    def _successish(st: str) -> bool:
+        return (
+            st == "success"
+            or st.startswith("added_sub2api")
+            or st.startswith("success_sub2api")
+            or st.startswith("added_sub2api_untested")
+        )
+
+    ok_n = 0
+    i = 0
+    try:
+        if threads >= 2:
+            stat = {"n": 0, "ok": 0}
+            slog.api_info("⚡", f"Chạy {threads} luồng song song — {batch} acc")
+
+            async def _lane(lane_id: int) -> None:
+                while True:
+                    if is_stop_requested() or stop_file.exists():
+                        return
+                    # claim 1 slot — đồng bộ (không await) nên an toàn trong event loop
+                    stat["n"] += 1
+                    cur = stat["n"]
+                    if cur > batch:
+                        return
+                    log.info("======== ACCOUNT [L%s] %s / %s ========", lane_id, cur, batch)
+                    slog.set_task(task_id=cur, cur=cur, total=batch)
+                    st = await _run_account()
+                    if st == "stopped":
+                        return
+                    if _successish(st):
+                        stat["ok"] += 1
+                    elif st.startswith("error:"):
+                        slog.api_err(st)
+                    if is_stop_requested() or stop_file.exists():
+                        return
+                    pause = (
+                        af.inter_account_cooldown(dmin, dmax)
+                        if _successish(st)
+                        else af.human_delay(max(20.0, dmin * 0.5), dmax)
+                    )
+                    log.info("[L%s] pause %.0fs trước acc kế tiếp", lane_id, pause)
+                    try:
+                        await interruptible_sleep(pause)
+                    except StopRequested:
+                        slog.api_info("🛑", f"[L{lane_id}] ESC trong lúc chờ — dừng lane")
+                        return
+
+            await asyncio.gather(*[_lane(w + 1) for w in range(threads)])
+            i = stat["n"]
+            ok_n = stat["ok"]
+            raise StopRequested("done")
+        while True:
+            if is_stop_requested():
+                slog.api_info(
+                    "🛑",
+                    f"Dừng theo lệnh ({stop_reason() or 'STOP'}) — {i} lượt, ok={ok_n}",
+                )
+                break
+
+            i += 1
+            if not until_stop and i > batch:
+                break
+            # STOP file / ESC between accounts
+            if is_stop_requested() or stop_file.exists():
+                slog.api_info(
+                    "🛑",
+                    f"Gặp STOP/ESC — dừng sau {i - 1} lượt (ok={ok_n})",
+                )
+                try:
+                    if stop_file.exists():
+                        stop_file.unlink()
+                except Exception:
+                    pass
+                break
+
+            total_disp = 999 if until_stop else batch
+            log.info(
+                "======== ACCOUNT %s / %s ========",
+                i,
+                "∞" if until_stop else batch,
+            )
+            slog.set_task(task_id=i, cur=i, total=total_disp)
+            status = await _run_account()
             st = str(status or "")
             if st == "stopped":
                 slog.api_info("🛑", f"Đã dừng (ok={ok_n} / lượt={i})")
@@ -422,6 +522,10 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
                     slog.api_info("🛑", "ESC trong lúc chờ — dừng batch")
                     break
     except StopRequested as e:
+        if str(e.reason) == "done":
+            log.info("Batch done (lanes): %s/%s success-ish", ok_n, batch)
+            slog.api_ok(f"Kết thúc loop: {ok_n} OK / {i} lượt")
+            return
         slog.api_info("🛑", f"ESC/STOP — dừng (đã chạy {i} lượt, ok={ok_n}) [{e.reason}]")
     except KeyboardInterrupt:
         request_stop("Ctrl+C", write_file=True)

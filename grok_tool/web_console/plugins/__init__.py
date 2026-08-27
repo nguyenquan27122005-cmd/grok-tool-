@@ -10,6 +10,13 @@ from .heygen import HeygenToolPlugin
 from .capcut import CapcutToolPlugin
 from .zai import ZaiToolPlugin
 from .canva import CanvaToolPlugin
+from .netflix import NetflixToolPlugin
+from .manus import ManusToolPlugin
+from .notion import NotionToolPlugin
+from .claude import ClaudeToolPlugin
+from .gpt import GptToolPlugin
+from .dreamina import DreaminaToolPlugin
+from .chatgpt import ChatgptToolPlugin
 
 
 _BRAND_COLORS = {
@@ -45,8 +52,13 @@ def all_plugins() -> Dict[str, BaseToolPlugin]:
         CapcutToolPlugin(),
         ZaiToolPlugin(),
         CanvaToolPlugin(),
-        _coming_soon("claude", "Claude / Anthropic", "Reg Claude (placeholder)", "✦"),
-        _coming_soon("openai", "ChatGPT / OpenAI", "Reg OpenAI (placeholder)", "◎"),
+        NetflixToolPlugin(),
+        ManusToolPlugin(),
+        NotionToolPlugin(),
+        ClaudeToolPlugin(),
+        GptToolPlugin(),
+        DreaminaToolPlugin(),
+        ChatgptToolPlugin(),
         # Icon: drop official mark at static/img/brands/{id}.svg — see brands/README.md
     ]
     return {p.meta.id: p for p in plugins}

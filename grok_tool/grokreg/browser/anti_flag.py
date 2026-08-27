@@ -399,20 +399,63 @@ def inter_account_cooldown(lo: float = 45.0, hi: float = 90.0) -> float:
     return human_delay(lo, hi)
 
 
-_GEO_CACHE: dict[str, Any] | None = None
-_REAL_ENV_CACHE: dict[str, Any] | None = None
+# Cache theo egress: key "" = trực tiếp, key khác = URL proxy đã dò
+_GEO_CACHE: tuple[str, dict[str, Any]] | None = None
+_REAL_ENV_CACHE: tuple[str, dict[str, Any]] | None = None
+
+# Egress lần chạy trước (data/egress_state.json). cf_clearance/__cf_bm do
+# Cloudflare cấp cho MỘT IP cụ thể — đổi IP/quốc gia mà giữ lại cookie cũ thì
+# vừa vô dụng vừa là tín hiệu bot, nên phải xóa thay vì keep mặc định.
+_EGRESS_STATE_PATH = ROOT / "data" / "egress_state.json"
+_CF_COOKIES_STALE = False
 
 
-def _detect_egress_geo() -> dict[str, Any]:
-    """Real public IP / country / timezone of current egress (no spoof)."""
+def _load_egress_state() -> dict[str, str]:
+    try:
+        d = json.loads(_EGRESS_STATE_PATH.read_text(encoding="utf-8"))
+        if isinstance(d, dict):
+            return {
+                "ip": str(d.get("ip") or ""),
+                "country": str(d.get("country") or ""),
+            }
+    except Exception:
+        pass
+    return {"ip": "", "country": ""}
+
+
+def _save_egress_state(ip: str, country: str) -> None:
+    try:
+        _EGRESS_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _EGRESS_STATE_PATH.write_text(
+            json.dumps({"ip": ip, "country": country}), encoding="utf-8"
+        )
+    except Exception as e:
+        log.debug("save egress state: %s", e)
+
+
+def _detect_egress_geo(proxy: str = "") -> dict[str, Any]:
+    """Public IP / country / timezone của egress hiện tại.
+
+    Có ``proxy`` thì dò geo QUA CHÍNH proxy đó. Nếu không, fingerprint sẽ căn
+    tz/lang theo IP nhà trong khi Chrome ra Internet bằng IP proxy — lệch múi
+    giờ/ngôn ngữ so với IP là lý do lớn khiến xAI trả error_generic ở sign-up.
+    """
     global _GEO_CACHE
-    if _GEO_CACHE is not None:
-        return dict(_GEO_CACHE)
+    key = str(proxy or "").strip()
+    if _GEO_CACHE is not None and _GEO_CACHE[0] == key:
+        return dict(_GEO_CACHE[1])
     out: dict[str, Any] = {}
     try:
         import urllib.request
 
-        with urllib.request.urlopen("https://ipinfo.io/json", timeout=5) as resp:
+        opener = (
+            urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": key, "https": key})
+            )
+            if key
+            else urllib.request.build_opener()
+        )
+        with opener.open("https://ipinfo.io/json", timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore") or "{}")
         out = {
             "ip": str(data.get("ip") or "").strip(),
@@ -422,11 +465,16 @@ def _detect_egress_geo() -> dict[str, Any]:
             "org": str(data.get("org") or "").strip(),
         }
     except Exception as e:
-        log.debug("egress geo detect failed: %s", e)
-    _GEO_CACHE = out
+        log.debug(
+            "egress geo detect failed (%s): %s",
+            "via proxy" if key else "direct",
+            e,
+        )
+    _GEO_CACHE = (key, out)
     if out.get("ip"):
         log.info(
-            "Egress geo (real): ip=%s country=%s tz=%s city=%s",
+            "Egress geo (%s): ip=%s country=%s tz=%s city=%s",
+            f"via proxy {key.rsplit('@', 1)[-1]}" if key else "direct",
             out.get("ip"),
             out.get("country") or "?",
             out.get("timezone") or "?",
@@ -645,12 +693,18 @@ def _detect_os_lang() -> str:
     return "en-US,en;q=0.9"
 
 
-def detect_real_environment() -> dict[str, Any]:
-    """Cache real machine + egress signals (source of truth for low-leak fingerprint)."""
+def detect_real_environment(proxy: str = "") -> dict[str, Any]:
+    """Cache real machine + egress signals (source of truth for low-leak fingerprint).
+
+    ``proxy`` = URL proxy (nếu có) — geo được dò qua chính proxy đó và cache
+    theo từng proxy, nên đổi proxy trong config là tự dò lại đúng region mới.
+    """
     global _REAL_ENV_CACHE
-    if _REAL_ENV_CACHE is not None:
-        return dict(_REAL_ENV_CACHE)
-    geo = _detect_egress_geo()
+    global _CF_COOKIES_STALE
+    key = str(proxy or "").strip()
+    if _REAL_ENV_CACHE is not None and _REAL_ENV_CACHE[0] == key:
+        return dict(_REAL_ENV_CACHE[1])
+    geo = _detect_egress_geo(key)
     os_tz = _detect_os_timezone()
     ip_tz = str(geo.get("timezone") or "").strip()
     # Canonical VN labels
@@ -673,7 +727,28 @@ def detect_real_environment() -> dict[str, Any]:
         "language": _detect_os_lang(),
         "platform": "Win32",
     }
-    _REAL_ENV_CACHE = env
+    _REAL_ENV_CACHE = (key, env)
+
+    # So sánh egress hiện tại với lần chạy trước → đánh dấu cookie CF stale
+    prev = _load_egress_state()
+    cur_ip = str(env.get("ip") or "")
+    cur_cc = str(env.get("country") or "")
+    ip_changed = bool(prev.get("ip") and cur_ip and prev["ip"] != cur_ip)
+    cc_changed = bool(
+        prev.get("country") and cur_cc and prev["country"] != cur_cc
+    )
+    _CF_COOKIES_STALE = ip_changed or cc_changed
+    if _CF_COOKIES_STALE:
+        log.info(
+            "Egress changed (%s→%s / %s→%s) — cookie CF cũ (cf_clearance/__cf_bm) là stale, sẽ xóa ở bước wipe",
+            prev.get("ip") or "?",
+            cur_ip or "?",
+            prev.get("country") or "?",
+            cur_cc or "?",
+        )
+    if cur_ip or cur_cc:
+        _save_egress_state(cur_ip, cur_cc)
+
     log.info(
         "Real env: os_tz=%s ip_tz=%s country=%s screen=%sx%s cpu=%s lang=%s",
         env["os_timezone"] or "?",
@@ -781,7 +856,9 @@ def pick_fingerprint(config: dict[str, Any] | None = None) -> dict[str, Any]:
     rand_lang = bool(af_cfg.get("randomize_lang_in_region", True))
     rand_hw = bool(af_cfg.get("randomize_hardware", True))
 
-    env = detect_real_environment()
+    # Geo phải theo egress THẬT của Chrome: có proxy thì dò qua proxy,
+    # không thì tz/lang bị căn theo IP nhà và lệch hẳn IP proxy đang dùng.
+    env = detect_real_environment(proxy=str(cfg.get("proxy") or "").strip())
     sw, sh = int(env.get("screen_w") or 1920), int(env.get("screen_h") or 1080)
 
     # --- viewport: isolated random window, clamped to real screen ---
@@ -810,8 +887,13 @@ def pick_fingerprint(config: dict[str, Any] | None = None) -> dict[str, Any]:
         lang = "en-US,en;q=0.9"
     elif rand_lang and align_to_ip:
         lang = random.choice(_lang_pool_for_egress(env, real_lang))
-    elif country == "US":
-        lang = "en-US,en;q=0.9"
+    elif align_to_ip and country in _LANG_BY_COUNTRY:
+        # Egress khác vùng máy (proxy nước ngoài) → nói tiếng theo IP, đừng để
+        # lộ vi-VN trên IP JP/DE. Cùng vùng (VD: máy VN + proxy VN) → giữ nguyên.
+        same_region = _same_region(
+            str(env.get("os_timezone") or ""), str(env.get("ip_timezone") or "")
+        )
+        lang = real_lang if same_region else _LANG_BY_COUNTRY[country][0]
     else:
         lang = real_lang
 
@@ -1542,6 +1624,26 @@ async def clear_sso_identity_only(tab: Any | None = None) -> int:
             )
     except Exception as e:
         log.debug("jar-level identity wipe failed: %s", e)
+
+    # 1b) Egress đổi IP/quốc gia so với lần trước → cf_clearance/__cf_bm mint
+    #     trên IP cũ là stale (vô dụng + tín hiệu bot) — xóa thay vì keep.
+    if _CF_COOKIES_STALE:
+        try:
+            cleared_cf = 0
+            for c in await _cdp_list_cookies(tab):
+                name = str(c.get("name") or "")
+                low = name.lower()
+                if low not in ("__cf_bm", "cf_clearance") and not low.startswith("cf_"):
+                    continue
+                domain = str(c.get("domain") or "")
+                path = str(c.get("path") or "/")
+                if await _cdp_delete_cookie(tab, name=name, domain=domain, path=path):
+                    cleared_cf += 1
+            if cleared_cf:
+                removed += cleared_cf
+                log.info("Cleared %s stale CF cookie(s) sau khi đổi egress IP/country", cleared_cf)
+        except Exception as e:
+            log.debug("stale CF wipe: %s", e)
 
     # 2) Fallback fixed domains (competitor clear_sso_cookies)
     names = ("sso", "sso-rw", "sso_token", "sso-token", "auth_token", "session", "sessionid")

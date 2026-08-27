@@ -28,3 +28,7 @@ Muốn file khác: `ToolMeta.brand_icon = "/static/img/brands/foo.svg"`
 | canva | App icon Canva (C vòng tròn #00C4CC) + `canva.png` Android |
 | claude | Claude mark trên #D97757 |
 | openai | OpenAI blossom trên #10A37F |
+| netflix | App icon: N ribbon 3 nếp #E50914 trên nền đen |
+| manus | Icon chính thức manus.im/brand (glyph tay trên nền trắng) |
+| notion | Cube N chính thức (Notion Labs) trên nền trắng |
+| dreamina | Favicon chính thức dreamina.capcut.com (mark 900×900) |

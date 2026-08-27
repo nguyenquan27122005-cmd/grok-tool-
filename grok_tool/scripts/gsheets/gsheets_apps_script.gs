@@ -1,17 +1,16 @@
 /**
- * REG → Google Sheet tabs "grok" + "heygen" + "capcut"
+ * REG → Google Sheet tabs grok / heygen / capcut / canva / zai / netflix / manus
  *
  * grok/heygen:
  *   # | Email | Password | Sub2API/Status | Thời gian | VPN
- * capcut:
- *   # | Email | Password | Chỗ đọc mail | Offer đang có | Ngày giờ | Ngày reg
+ * capcut/canva/zai/netflix/manus:
+ *   # | Email | Password | Chỗ đọc mail | Gói + còn lại (tháng) | Ngày giờ | Ngày reg
  *
- * POST body.tab = "grok" | "heygen" | "capcut" (mặc định grok).
- * Không đổi tên file, không xóa tab tool khác.
+ * POST body.tab = tên tab trên. Không đổi tên file, không xóa tab tool khác.
  */
 
 // Set in Apps Script project settings / Script Properties, or edit locally (do not commit real value)
-var SECRET = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET') || 'CHANGE_ME';
+var SECRET = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET') || 'grok-overnight-export';
 var DEFAULT_GID = 0;
 var TAB_NAME = 'grok';
 var DEFAULT_PASS = '';
@@ -32,6 +31,9 @@ function doPost(e) {
     }
     if (action === 'ensure_tab') {
       return jsonOut_({ ok: true, result: ensureTab_(body) });
+    }
+    if (action === 'delete_rows') {
+      return jsonOut_({ ok: true, result: deleteRows_(body) });
     }
     if (action === 'append') {
       return jsonOut_({ ok: true, result: appendAccount_(body) });
@@ -59,16 +61,28 @@ function doGet(e) {
 
 function tabNameOf_(body) {
   var t = String((body && (body.tab || body.tab_name)) || '').trim().toLowerCase();
-  if (t === 'heygen') return 'heygen';
-  if (t === 'capcut') return 'capcut';
-  if (t === 'zai') return 'zai';
-  return 'grok';
+  var ok = {
+    grok: 1, heygen: 1, capcut: 1, canva: 1, zai: 1, netflix: 1, manus: 1, notion: 1,
+    dreamina: 1
+  };
+  return ok[t] ? t : 'grok';
+}
+
+function isOfferTab_(tabName) {
+  return tabName === 'capcut' || tabName === 'canva' || tabName === 'zai'
+      || tabName === 'netflix' || tabName === 'manus' || tabName === 'notion'
+      || tabName === 'dreamina';
 }
 
 function titleOf_(tabName) {
   if (tabName === 'heygen') return 'HEYGEN REG  ·  ACC THÀNH CÔNG';
   if (tabName === 'capcut') return 'CAPCUT REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'canva') return 'CANVA REG  ·  ACC THÀNH CÔNG';
   if (tabName === 'zai') return 'Z.AI / ZCODE REG  ·  ACC CÓ QUOTA';
+  if (tabName === 'netflix') return 'NETFLIX REG  ·  EMAIL/PASSWORD (DỪNG PAYMENT)';
+  if (tabName === 'manus') return 'MANUS REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'notion') return 'NOTION REG  ·  ACC CÓ OFFER 1/3/6 THÁNG';
+  if (tabName === 'dreamina') return 'DREAMINA REG  ·  ACC + CREDIT';
   return 'GROK REG  ·  ACC THÀNH CÔNG';
 }
 
@@ -77,19 +91,20 @@ function nameColOf_(tabName) {
 }
 
 function colCountOf_(tabName) {
-  return tabName === 'capcut' || tabName === 'zai' ? 7 : 6;
+  return isOfferTab_(tabName) ? 7 : 6;
 }
 
 function headerOf_(tabName) {
-  if (tabName === 'capcut' || tabName === 'zai') {
-    return ['#', 'Email', 'Password', 'Chỗ đọc mail', 'Offer đang có', 'Ngày giờ', 'Ngày reg'];
+  if (isOfferTab_(tabName)) {
+    var col5 = tabName === 'dreamina' ? 'Gói / Credit' : 'Gói + còn lại';
+    return ['#', 'Email', 'Password', 'Chỗ đọc mail', col5, 'Ngày giờ', 'Ngày reg'];
   }
   return ['#', 'Email', 'Password', nameColOf_(tabName), 'Thời gian', 'VPN'];
 }
 
 function bannerOf_(tabName, n) {
-  if (tabName === 'capcut' || tabName === 'zai') {
-    return 'FULL  (email | mk | chỗ đọc mail | offer | ngày giờ | ngày reg)  ·  ' + n + ' acc';
+  if (isOfferTab_(tabName)) {
+    return 'FULL  (email | mk | chỗ đọc mail | gói + tháng còn lại | ngày giờ | ngày reg)  ·  ' + n + ' acc';
   }
   var mid = tabName === 'heygen' ? 'status' : 'sub2api_name';
   return 'FULL  (email | pass | ' + mid + ' | thời gian | VPN)  ·  ' + n + ' acc';
@@ -126,8 +141,33 @@ function ensureTab_(body) {
   };
 }
 
-function findHeaderRow_(values) {
-  for (var i = 0; i < values.length; i++) {
+/** Xoá các dòng acc theo email (dùng khi ghi nhầm tab — di chuyển acc giữa tab). */
+function deleteRows_(body) {
+  var ss = (body && body.spreadsheet_id)
+    ? SpreadsheetApp.openById(body.spreadsheet_id)
+    : SpreadsheetApp.getActiveSpreadsheet();
+  var tabName = tabNameOf_(body);
+  var dash = ss.getSheetByName(tabName);
+  if (!dash) throw new Error('no tab: ' + tabName);
+  var emails = (body.emails || []).map(function (e) {
+    return String(e || '').trim().toLowerCase();
+  }).filter(function (e) { return e.indexOf('@') >= 0; });
+  if (!emails.length) throw new Error('delete_rows requires emails[]');
+  var lastRow = dash.getLastRow();
+  if (!lastRow) return { tab: tabName, deleted: 0, emails: emails };
+  var lastCol = Math.max(dash.getLastColumn(), 4);
+  var values = dash.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  var toDelete = [];
+  for (var r = 0; r < values.length; r++) {
+    var em = String(values[r][1] || '').trim().toLowerCase();
+    if (em && emails.indexOf(em) >= 0) toDelete.push(r + 1);
+  }
+  for (var i = toDelete.length - 1; i >= 0; i--) dash.deleteRow(toDelete[i]);
+  SpreadsheetApp.flush();
+  return { tab: dash.getName(), deleted: toDelete.length, wanted: emails.length };
+}
+
+function findHeaderRow_(values) {  for (var i = 0; i < values.length; i++) {
     var c0 = String(values[i][0] || '').trim();
     var c1 = String(values[i][1] || '').toLowerCase();
     if (c0 === '#' && c1.indexOf('email') >= 0) return i;
@@ -194,7 +234,7 @@ function appendAccount_(body) {
   }
 
   var n = found >= 0 ? values[found][0] : count + 1;
-  var rowVals = (tabName === 'capcut' || tabName === 'zai')
+  var rowVals = isOfferTab_(tabName)
     ? [n, email, pass, inbox || '—', offer || '—', when || '—', regDate || '—']
     : [n, email, pass, name || '—', when || '—', vpn || '—'];
   var added = false;
@@ -390,8 +430,14 @@ function writeLayout_(dash, tabName, s, full) {
     .setValue(titleOf_(tabName))
     .setFontWeight('bold').setFontSize(16).setBackground('#00C8D2').setFontColor('#fff')
     .setVerticalAlignment('middle');
-  if (tabName !== 'capcut') {
+  if (!isOfferTab_(tabName)) {
     dash.getRange(1, 1, 1, ncols).setBackground('#1a73e8');
+  } else if (tabName === 'netflix') {
+    dash.getRange(1, 1, 1, ncols).setBackground('#E50914');
+  } else if (tabName === 'manus') {
+    dash.getRange(1, 1, 1, ncols).setBackground('#6D5CFF');
+  } else if (tabName === 'zai') {
+    dash.getRange(1, 1, 1, ncols).setBackground('#1F63EC');
   }
   dash.setRowHeight(1, 36);
 
@@ -443,7 +489,7 @@ function writeLayout_(dash, tabName, s, full) {
   dash.setColumnWidth(1, 50);
   dash.setColumnWidth(2, 300);
   dash.setColumnWidth(3, 180);
-  if (tabName === 'capcut') {
+  if (isOfferTab_(tabName)) {
     dash.setColumnWidth(4, 280);
     dash.setColumnWidth(5, 280);
     dash.setColumnWidth(6, 170);
@@ -462,7 +508,11 @@ function deleteOtherTabs_(ss, keep) {
     var sh = sheets[i];
     if (sh.getSheetId() === keep.getSheetId()) continue;
     var n = sh.getName();
-    if (n === 'capcut' || n === 'heygen' || n === 'grok') continue;
+    if (
+      n === 'capcut' || n === 'heygen' || n === 'grok' || n === 'canva'
+      || n === 'zai' || n === 'netflix' || n === 'manus' || n === 'notion'
+      || n === 'dreamina'
+    ) continue;
     if (
       n === 'Acc FULL' || n === 'Acc FAIL' || n === 'Lich su' ||
       n === 'Tong quan' || n.indexOf('grok_old') === 0 || n.indexOf('old_') === 0

@@ -38,9 +38,36 @@ export const stopJob = (job_id = null) =>
   });
 export const getConfigSummary = () => api('/api/config/summary');
 export const getHealth = () => api('/api/health');
+export const getProxies = () => api('/api/proxies');
+export const saveProxies = (payload) =>
+  api('/api/proxies', { method: 'POST', body: JSON.stringify(payload) });
 export const getHotmails = (id) => api(`/api/tools/${id}/hotmails`);
 export const importHotmails = (id, text, mode = 'append') =>
   api(`/api/tools/${id}/hotmails`, {
     method: 'POST',
     body: JSON.stringify({ text, mode }),
   });
+export const getSolverStatus = () => api('/api/solver');
+export const solverAction = (action) =>
+  api('/api/solver', {
+    method: 'POST',
+    body: JSON.stringify({ action }),
+  });
+export const listJobs = () => api('/api/jobs');
+export const getDashboard = (days = 14) => api(`/api/dashboard?days=${days}`);
+export const getHealthAccounts = () => api('/api/health/accounts');
+export const runHealthCheck = () =>
+  api('/api/health/run', { method: 'POST', body: JSON.stringify({}) });
+export const getBackups = () => api('/api/backups');
+export const runBackup = () =>
+  api('/api/backups/run', { method: 'POST', body: JSON.stringify({}) });
+export const rerunJob = (jobId, params = null) =>
+  api(`/api/jobs/${jobId}/rerun`, {
+    method: 'POST',
+    body: JSON.stringify(params ? { params } : {}),
+  });
+export const getDockerStatus = () => api('/api/docker');
+export const dockerAction = (action, name = null) =>
+  api('/api/docker', { method: 'POST', body: JSON.stringify({ action, name }) });
+export const lookupMail = (address) =>
+  api(`/api/mail/lookup?address=${encodeURIComponent(address)}`);

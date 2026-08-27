@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -56,9 +57,25 @@ def append_progress(rec: dict) -> None:
 async def main() -> int:
     config = load_config()
     config.setdefault("sub2api", {})
-    config["sub2api"]["enabled"] = True
-    config["sub2api"]["group"] = "supergrok"
-    config["sub2api"]["group_ids"] = [3]
+    sub2api = config["sub2api"]
+    # Credentials come from config.json or env vars — never hardcoded here.
+    for key, env in (
+        ("sub2api_user", "SUB2API_USER"),
+        ("sub2api_pass", "SUB2API_PASS"),
+        ("sub2api_url", "SUB2API_URL"),
+    ):
+        if not sub2api.get(key) and os.environ.get(env):
+            sub2api[key] = os.environ[env]
+    if not sub2api.get("sub2api_user") or not sub2api.get("sub2api_pass"):
+        log.error(
+            "Missing Sub2API credentials: set sub2api.sub2api_user / sub2api_pass "
+            "in config.json or SUB2API_USER / SUB2API_PASS env vars."
+        )
+        return 1
+    sub2api["enabled"] = True
+    sub2api.setdefault("group", "supergrok")
+    sub2api.setdefault("group_ids", [2])
+    sub2api.setdefault("sub2api_api_token", "")
     config["sub2api"]["name_prefix"] = "supergrok"
     config["sub2api"]["name_include_email"] = True
     config["sub2api"]["run_test"] = False

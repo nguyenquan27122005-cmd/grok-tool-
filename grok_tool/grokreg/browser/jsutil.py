@@ -63,9 +63,13 @@ async def _exec_js(tab: Any, script: str) -> Any:
         for sc in candidates:
             try:
                 try:
-                    raw = await fn(sc, return_by_value=True)
+                    # await_promise để script async trả về giá trị thay vì promise
+                    raw = await fn(sc, return_by_value=True, await_promise=True)
                 except TypeError:
-                    raw = await fn(sc)
+                    try:
+                        raw = await fn(sc, return_by_value=True)
+                    except TypeError:
+                        raw = await fn(sc)
                 val = _unwrap_js_result(raw)
                 # skip useless objectId-only remote objects
                 if isinstance(val, dict) and set(val.keys()) <= {

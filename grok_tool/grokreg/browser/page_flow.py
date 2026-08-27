@@ -2721,6 +2721,10 @@ async def capture_page_error_exact(tab: Any) -> dict[str, str]:
         if (sl.includes('we use cookies') || sl.includes('manage preferences')) return true;
         if (sl.includes('dialog closed') || sl.includes('[`dialog')) return true;
         if (sl.includes('sign up with') || sl.includes('continue with google')) return true;
+        // Helper text của trang OTP ("Didn't receive a code? Resend (30)") là
+        // dấu hiệu ĐÃ submit email thành công — tuyệt đối không phải lỗi
+        if (sl.includes("didn't receive a code") || sl.includes('didnt receive a code')) return true;
+        if (/^resend \(\d+\)$/.test(sl) || /^resend \(\d+\)\s*$/.test(sl)) return true;
         return false;
       };
       for (const sel of sels) {
@@ -2828,8 +2832,13 @@ async def capture_page_error_exact(tab: Any) -> dict[str, str]:
 
 
 def _is_privacy_noise_error(msg: str) -> bool:
-    """True if detector hit cookie/privacy UI, not a real xAI signup error."""
+    """True if detector hit cookie/privacy UI or OTP-step helper text, not a real xAI signup error."""
     sl = (msg or "").lower()
+    # Helper text của trang OTP — email đã submit OK, mã đã được gửi
+    if "didn't receive a code" in sl or "didnt receive a code" in sl:
+        return True
+    if re.match(r"^resend \(\d+\)", sl.strip()):
+        return True
     return (
         "your privacy" in sl
         or "dialog closed" in sl

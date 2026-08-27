@@ -56,6 +56,7 @@ from grokreg.core.runtime import (
 
 from grokreg.core.config import load_config
 from grokreg.browser.jsutil import _exec_js, _unwrap_js_result  # noqa: F401
+from grokreg.browser.proxyauth import setup_proxy_auth, split_proxy_creds
 
 def steal_focus_allowed(config: dict[str, Any] | None = None) -> bool:
     """False = never pop Chrome in front of user's work."""
@@ -132,8 +133,21 @@ def build_chrome_options(
     # Proxy / headless
     proxy = (config.get("proxy") or "").strip()
     if proxy:
-        _safe_add_arg(options, f"--proxy-server={proxy}")
-        log.info("Proxy: %s", proxy)
+        bare, user, _ = split_proxy_creds(proxy)
+        if user:
+            log.warning(
+                "Proxy có user:pass — Chrome chỉ nhận host:port, auth trả lời qua CDP (407)"
+            )
+        _safe_add_arg(options, f"--proxy-server={bare}")
+        log.info("Proxy: %s", bare)
+
+    # Chrome bị che/offscreen trên Windows bị throttle renderer → lệnh CDP
+    # (NAVIGATE/EVALUATE/dispatchMouseEvent) treo tới 60s. Tắt occlusion
+    # throttling để CDP giữ tốc độ bình thường khi cửa sổ không hiển thị.
+    _safe_add_arg(options, "--disable-backgrounding-occluded-windows")
+    _safe_add_arg(options, "--disable-renderer-backgrounding")
+    _safe_add_arg(options, "--disable-background-timer-throttling")
+    _safe_add_arg(options, "--disable-features=CalculateNativeWinOcclusion")
 
     if config.get("headless"):
         _safe_add_arg(options, "--headless=new")
@@ -1029,6 +1043,7 @@ async def open_or_attach_browser(config: dict[str, Any]) -> BrowserHandle:
 
     log.info(">>> START Chrome (profile=%s port %s) <<<", config.get("chrome_user_data_dir"), port)
     tab = await browser.start()
+    await setup_proxy_auth(tab, config)
 
     # Web / desktop work: never pop Chrome in front unless chrome_steal_focus=true
     await asyncio.sleep(0.4)

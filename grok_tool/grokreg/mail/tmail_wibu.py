@@ -116,6 +116,18 @@ class TmailWibuProvider:
         if isinstance(pref, str):
             pref = [p.strip() for p in pref.split(",") if p.strip()]
         self.preferred_domains = [str(d).strip().lower() for d in pref if str(d).strip()]
+        skip = cfg.get("skip_domains") or cfg.get("blocked_domains") or []
+        if isinstance(skip, str):
+            skip = [p.strip() for p in skip.split(",") if p.strip()]
+        self.skip_domains = {
+            str(d).strip().lower().lstrip("@") for d in skip if str(d).strip()
+        }
+        sfx = cfg.get("skip_suffixes") or []
+        if isinstance(sfx, str):
+            sfx = [p.strip() for p in sfx.split(",") if p.strip()]
+        self.skip_suffixes = [
+            str(s).strip().lower().lstrip(".") for s in sfx if str(s).strip()
+        ]
         # Prefer custom create on clean domains — random multi-subdomains often blocked by xAI
         self.mode = str(cfg.get("create_mode") or "create").lower()  # create | random
         self._last_csrf: str = ""
@@ -388,26 +400,33 @@ class TmailWibuProvider:
             email = f"{user}@{domain}"
         return email
 
+    def _is_skipped(self, domain: str) -> bool:
+        d = (domain or "").strip().lower()
+        if not d:
+            return True
+        if d in self.skip_domains:
+            return True
+        for sfx in self.skip_suffixes:
+            if d == sfx or d.endswith("." + sfx):
+                return True
+        return False
+
     def _pick_domain(self, live: list[str]) -> str:
+        live = [d for d in live if not self._is_skipped(d)]
         live_set = set(live)
         # preferred that exist live (config order first)
         pref = (
             [d for d in self.preferred_domains if d in live_set]
             if live
-            else list(self.preferred_domains)
+            else [d for d in self.preferred_domains if not self._is_skipped(d)]
         )
         def _is_clean(d: str) -> bool:
             # reject long random multi-sub (xAI + OTP often drop these)
             if d.count(".") > 2 or len(d) > 22:
                 return False
             # random prefix on known tlds: anro.name.ng / btaeli.name.ng
-            if re.match(r"^[a-z0-9]{3,}\.(name\.ng)$", d) and d not in (
-                "aden.name.ng",
-                "adon.name.ng",
-                "alen.name.ng",
-                "ames.name.ng",
-                "adix.name.ng",
-            ):
+            # short word.name.ng (baron/begin/ames) is usable; random 7+ prefix is junk
+            if re.match(r"^[a-z0-9]{7,}\.(name\.ng)$", d):
                 return False
             if re.match(r"^[a-z0-9]{6,}\.(edu\.vn|top)$", d):
                 return False
@@ -426,8 +445,13 @@ class TmailWibuProvider:
         else:
             pool = list(clean)
         if not pool:
-            # shortest live fallback
-            pool = sorted(live, key=len)[:20] if live else ["wibucrypto.pro"]
+            # shortest live fallback (already skip-filtered)
+            pool = sorted(live, key=len)[:20]
+        if not pool:
+            raise RuntimeError(
+                "TmailWibu: no domains left after skip_domains="
+                f"{sorted(self.skip_domains)[:12]} suffixes={self.skip_suffixes}"
+            )
         # Use same ranker as azpop (success history + soft ban, no random first)
         try:
             from grokreg.browser.anti_flag import pick_diverse_domain, rank_domains
@@ -440,11 +464,13 @@ class TmailWibuProvider:
             top = pool[: max(3, min(6, len(pool)))]
             choice = random.choice(top)
         log.info(
-            "TmailWibu domain pick: %s (pref=%s clean=%s live=%s) top=%s",
+            "TmailWibu domain pick: %s (pref=%s clean=%s live=%s skip=%s sfx=%s) top=%s",
             choice,
             len(pref),
             len(clean),
             len(live),
+            len(self.skip_domains),
+            self.skip_suffixes,
             ranked_preview,
         )
         return choice

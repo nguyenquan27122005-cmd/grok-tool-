@@ -320,8 +320,15 @@ def push_via_webapp(gs: dict[str, Any], payload: dict[str, Any]) -> str:
     payload["mode"] = gs.get("mode") or "replace_night"
     payload["tab"] = str(payload.get("tab") or gs.get("tab") or "grok").strip() or "grok"
 
-    # follow redirects (Apps Script often 302)
-    r = requests.post(url, json=payload, timeout=90, allow_redirects=True)
+    # follow redirects (Apps Script often 302). Content-Type phải là
+    # text/plain — POST application/json bị Google trả 404 sau redirect.
+    r = requests.post(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "text/plain;charset=utf-8"},
+        timeout=90,
+        allow_redirects=True,
+    )
     if r.status_code >= 400:
         raise RuntimeError(f"webapp HTTP {r.status_code}: {r.text[:300]}")
     text = (r.text or "").strip()
@@ -519,6 +526,26 @@ def lookup_account_row(email: str) -> dict[str, str]:
     return out
 
 
+def _vpn_label_for(email: str) -> str:
+    """VPN label cho 1 email: ưu tiên meta đã lưu, không có thì detect exit IP."""
+    em = str(email or "").strip().lower()
+    meta = _load_vpn_meta()
+    label = str(meta.get(em) or "").strip()
+    if label and label not in ("—", "— (no VPN / unknown)"):
+        return label
+    gs = load_gs_config()
+    if not gs.get("detect_vpn_country", True):
+        return "—"
+    vpn = detect_exit_ip_country()
+    label = str(vpn.get("label") or "").strip()
+    if label and label not in ("—", "— (no VPN / unknown)"):
+        if em:
+            meta[em] = label
+            _save_vpn_meta(meta)
+        return label
+    return "—"
+
+
 def append_one_to_sheet(email: str, tab: str = "grok") -> str:
     gs = load_gs_config()
     if not gs.get("enabled", True):
@@ -533,7 +560,8 @@ def append_one_to_sheet(email: str, tab: str = "grok") -> str:
             "name": row["name"],
             "status": row["status"],
             "time": row["ts"],
-            "vpn": "—",
+            # VPN thật (meta/exit IP) — không hardcode '—' nữa
+            "vpn": _vpn_label_for(row["email"] or email),
         },
     }
     return push_via_webapp(gs, payload)

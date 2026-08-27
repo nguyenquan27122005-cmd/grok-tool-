@@ -30,7 +30,7 @@ def startupinfo() -> Any | None:
 def kwargs(*, new_group: bool = False, extra_flags: int = 0) -> dict[str, Any]:
     """Merge into subprocess.Popen/run: ``**winhide.kwargs()``."""
     if os.name != "nt":
-        return {}
+        return {"start_new_session": True} if new_group else {}
     flags = creationflags(extra_flags)
     if new_group:
         flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)

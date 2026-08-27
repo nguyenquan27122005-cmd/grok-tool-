@@ -51,6 +51,9 @@ Chi tiết: [Usage](grok_tool/docs/USAGE.md) · [VS Code + API key Sub2API](grok
 | **Sub2API** | SSO → `POST /api/v1/admin/grok/sso-to-oauth`, tên `grok free NNN` |
 | **Google Sheet** | Tùy chọn, Apps Script webapp — tắt mặc định |
 | **Web control plane** | Aurora UI tại `http://127.0.0.1:8787` |
+| **Multi-tool** | Plugin registry: grok, netflix, capcut, dreamina, zai, manus, notion, claude, canva, chatgpt, gpt, heygen, sibling… |
+| **Quản lý Docker** | Trang Cài đặt: bật Docker Desktop + start/stop/restart container Sub2API |
+| **Ops tự động** | Dashboard, backup hàng ngày, health-check acc, notifier (Telegram/webhook), proxy pool dùng chung |
 | **Dừng an toàn** | `ESC` · `Ctrl+C` · file `data/STOP` · nút Stop trên web |
 | **Không lộ secret** | `.gitignore` chặn config, acc, cookie, Chrome profile |
 
@@ -386,6 +389,33 @@ Trước khi push:
 ```bat
 CHECK_BEFORE_PUSH.bat
 ```
+
+---
+
+## Kiểm thử & CI
+
+Repo tích hợp **GitHub Actions** chạy **tự động mỗi commit/push** — bắt sớm "đỏ âm thầm" (lệch golden plugin, API, UI binding, syntax JS).
+
+```text
+.github/workflows/ci.yml
+├── Job pytest     → tests/ deterministic (spawn subprocess + Import không cần Docker/server/network)
+└── Job js-syntax  → node --check app.js / api.js
+```
+
+Chạy test tại máy (Windows):
+
+```bat
+venv\Scripts\python.exe -m pytest tests -q
+```
+
+Bộ test gồm:
+
+- **Golden plugin** (`test_plugins_golden.py`) — hành vi `build_command` + signature field KHÔNG được đổi lệch khi refactor.
+- **API wiring** (`test_api_docker.py` · `test_api_solver.py` · `test_api_jobs.py`) — mock subprocess/solver/manager, verify endpoint lỗi 400/404 và handler gọi đúng.
+- **UI binding** (`test_ui_bindings.py`) — đối chiếu `getElementById()` trong JS với `id="..."` thực tế, bắt typo/đổi id mà quên cập nhật.
+- **Logic** (`test_job_manager.py` · `test_proxy_pool.py` · `test_notifier.py` · `test_hotmail_*` · `test_batch_resume.py`).
+
+`test_docker_api_manual.py` yêu cầu web console `:8787` + Docker đang chạy → **không** nằm trong CI (chạy tay khi cần).
 
 ---
 

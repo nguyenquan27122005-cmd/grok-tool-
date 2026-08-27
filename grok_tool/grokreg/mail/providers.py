@@ -493,6 +493,8 @@ class HotmailProvider:
     TOKEN_URL = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
     TOKEN_URL_COMMON = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
     GRAPH_MESSAGES = "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages"
+    # OTP hay rơi vào Junk — poll cả hai thư mục
+    GRAPH_MESSAGES_JUNK = "https://graph.microsoft.com/v1.0/me/mailFolders/junkemail/messages"
 
     def __init__(self, list_path: Path, max_aliases: int = 5) -> None:
         self.list_path = list_path
@@ -709,6 +711,24 @@ class HotmailProvider:
             f"Skipped: {', '.join(skipped[:8])}. Wait or add a new line."
         )
 
+    def acquire_mailbox(self, mailbox: str, default_client_id: str = "") -> EmailSession:
+        """Custom-domain read: dùng ĐÚNG Hotmail này (forwarding destination) để
+        đọc OTP. Không tiêu alias — provider custom_domain không gọi mark_used()."""
+        lines = self._read_lines() if self.list_path.exists() else []
+        want = (mailbox or "").strip().lower()
+        for raw in lines:
+            parts = [p.strip() for p in raw.split("|")]
+            if not parts or not parts[0]:
+                continue
+            if parts[0].lower() == want:
+                return self._build_session(
+                    raw, alias_index=0, default_client_id=default_client_id
+                )
+        raise RuntimeError(
+            f"Không tìm thấy Hotmail {mailbox!r} trong pool {self.list_path.name} — "
+            "thêm acc đó vào data/hotmails.txt rồi thử lại"
+        )
+
     def _refresh_access_token(self, refresh_token: str) -> Optional[str]:
         scopes = [
             "https://graph.microsoft.com/.default offline_access",
@@ -747,38 +767,39 @@ class HotmailProvider:
         while time.time() < deadline:
             raise_if_stop()
             try:
-                r = requests.get(
-                    self.GRAPH_MESSAGES,
-                    headers=headers,
-                    params={
-                        "$top": 15,
-                        "$orderby": "receivedDateTime desc",
-                        "$select": "id,subject,bodyPreview,body,from,receivedDateTime",
-                    },
-                    timeout=15,
-                )
-                if r.status_code == 401:
-                    log.warning("Graph 401 — token invalid")
-                    return None
-                if r.status_code != 200:
-                    sleep_interruptible(4)
-                    continue
-
-                for msg in r.json().get("value", []):
-                    mid = msg.get("id", "")
-                    if mid in seen:
+                for graph_url in (self.GRAPH_MESSAGES, self.GRAPH_MESSAGES_JUNK):
+                    r = requests.get(
+                        graph_url,
+                        headers=headers,
+                        params={
+                            "$top": 15,
+                            "$orderby": "receivedDateTime desc",
+                            "$select": "id,subject,bodyPreview,body,from,receivedDateTime",
+                        },
+                        timeout=15,
+                    )
+                    if r.status_code == 401:
+                        log.warning("Graph 401 — token invalid")
+                        return None
+                    if r.status_code != 200:
                         continue
-                    seen.add(mid)
-                    subject = msg.get("subject") or ""
-                    preview = msg.get("bodyPreview") or ""
-                    body = (msg.get("body") or {}).get("content") or ""
-                    blob = f"{subject}\n{preview}\n{body}"
-                    lower = blob.lower()
-                    if any(k in lower for k in ("x.ai", "xai", "grok", "verification", "code", "verify")):
-                        otp = extract_otp(blob)
-                        if otp:
-                            log.info("OTP found (Graph): %s", otp)
-                            return otp
+
+                    for msg in r.json().get("value", []):
+                        mid = msg.get("id", "")
+                        if mid in seen:
+                            continue
+                        seen.add(mid)
+                        subject = msg.get("subject") or ""
+                        preview = msg.get("bodyPreview") or ""
+                        body = (msg.get("body") or {}).get("content") or ""
+                        blob = f"{subject}\n{preview}\n{body}"
+                        lower = blob.lower()
+                        if any(k in lower for k in ("x.ai", "xai", "grok", "verification", "code", "verify")):
+                            otp = extract_otp(blob)
+                            if otp:
+                                where = "Junk" if "junkemail" in graph_url else "Inbox"
+                                log.info("OTP found (Graph %s): %s", where, otp)
+                                return otp
             except StopRequested:
                 raise
             except Exception as e:
@@ -810,40 +831,44 @@ class HotmailProvider:
                 else:
                     mail.login(address, password)
 
-                mail.select("INBOX")
-                _, data = mail.search(None, "ALL")
-                ids = data[0].split()
-                for mid in reversed(ids[-20:]):
-                    _, msg_data = mail.fetch(mid, "(RFC822)")
-                    if not msg_data or not msg_data[0]:
+                # Outlook: Junk có thể nuốt OTP — quét cả INBOX lẫn Junk
+                for folder in ("INBOX", "Junk"):
+                    status_sel, _ = mail.select(folder)
+                    if status_sel != "OK":
                         continue
-                    raw = msg_data[0][1]
-                    if not isinstance(raw, (bytes, bytearray)):
-                        continue
-                    msg = email_lib.message_from_bytes(raw)
-                    subject = str(msg.get("Subject", ""))
-                    parts: list[str] = [subject]
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            if part.get_content_type() in ("text/plain", "text/html"):
-                                try:
-                                    payload = part.get_payload(decode=True) or b""
-                                    parts.append(payload.decode(errors="ignore"))
-                                except Exception:
-                                    pass
-                    else:
-                        try:
-                            payload = msg.get_payload(decode=True) or b""
-                            parts.append(payload.decode(errors="ignore"))
-                        except Exception:
-                            pass
-                    blob = "\n".join(parts)
-                    lower = blob.lower()
-                    if any(k in lower for k in ("x.ai", "xai", "grok", "verification", "code", "verify")):
-                        otp = extract_otp(blob)
-                        if otp:
-                            log.info("OTP found (IMAP): %s", otp)
-                            return otp
+                    _, data = mail.search(None, "ALL")
+                    ids = data[0].split()
+                    for mid in reversed(ids[-20:]):
+                        _, msg_data = mail.fetch(mid, "(RFC822)")
+                        if not msg_data or not msg_data[0]:
+                            continue
+                        raw = msg_data[0][1]
+                        if not isinstance(raw, (bytes, bytearray)):
+                            continue
+                        msg = email_lib.message_from_bytes(raw)
+                        subject = str(msg.get("Subject", ""))
+                        parts: list[str] = [subject]
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                if part.get_content_type() in ("text/plain", "text/html"):
+                                    try:
+                                        payload = part.get_payload(decode=True) or b""
+                                        parts.append(payload.decode(errors="ignore"))
+                                    except Exception:
+                                        pass
+                        else:
+                            try:
+                                payload = msg.get_payload(decode=True) or b""
+                                parts.append(payload.decode(errors="ignore"))
+                            except Exception:
+                                pass
+                        blob = "\n".join(parts)
+                        lower = blob.lower()
+                        if any(k in lower for k in ("x.ai", "xai", "grok", "verification", "code", "verify")):
+                            otp = extract_otp(blob)
+                            if otp:
+                                log.info("OTP found (IMAP %s): %s", folder, otp)
+                                return otp
             except StopRequested:
                 raise
             except Exception as e:
@@ -898,12 +923,13 @@ def wait_otp_smart(
 ) -> Optional[str]:
     """
     OTP priority:
-      hotmail    → mail_api — newest xAI mail only
+      hotmail      → mail_api — newest xAI mail only
+      custom_domain→ mail_api — forward về Hotmail, cùng cơ chế hotmail
       azpopmail  → https://azpopmail.com/document REST API
       tmail_wibu → https://tmail.wibucrypto.pro Livewire
       mailtm     → Mail.tm native API
     """
-    if session.provider == "hotmail":
+    if session.provider in ("hotmail", "custom_domain"):
         if mail_api.enabled:
             otp = mail_api.wait_otp(
                 session,

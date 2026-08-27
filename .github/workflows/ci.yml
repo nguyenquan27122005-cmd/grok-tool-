@@ -1,0 +1,59 @@
+name: CI
+
+# Chạy test mỗi commit / PR — bắt "đỏ âm thầm" sớm (golden plugin, API, UI binding).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (deterministic)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: grok_tool
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -U pip
+          pip install pytest
+
+      # Chạy tập test deterministic — KHÔNG cần Docker/server/network.
+      # test_docker_api_manual.py cần web console :8787 đang chạy → loại khỏi CI.
+      - name: pytest
+        run: |
+          python -m pytest \
+            tests/test_api_docker.py \
+            tests/test_api_jobs.py \
+            tests/test_api_solver.py \
+            tests/test_ui_bindings.py \
+            tests/test_plugins_golden.py \
+            tests/test_job_manager.py \
+            tests/test_notifier.py \
+            tests/test_hotmail_alias.py \
+            tests/test_hotmail_import.py \
+            tests/test_batch_resume.py \
+            -q --tb=short
+
+  js-syntax:
+    name: JS (node --check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax check app.js / api.js
+        run: |
+          node --check web_console/static/js/app.js
+          node --check web_console/static/js/api.js

@@ -565,25 +565,27 @@ class MailApiClient:
         if not ids:
             access = self._ms_graph_access(session)
             if access:
-                try:
-                    g = requests.get(
-                        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
-                        headers={"Authorization": f"Bearer {access}"},
-                        params={
-                            "$top": 30,
-                            "$orderby": "receivedDateTime desc",
-                            "$select": "id,subject,receivedDateTime",
-                        },
-                        timeout=20,
-                    )
-                    if g.status_code == 200:
-                        ids = {
-                            str(m.get("id"))
-                            for m in g.json().get("value", [])
-                            if m.get("id")
-                        }
-                except Exception as e:
-                    log.debug("snapshot_graph_ids: %s", e)
+                # gộp cả Inbox lẫn Junk — mail OTP có thể rơi vào Junk
+                for folder in ("inbox", "junkemail"):
+                    try:
+                        g = requests.get(
+                            f"https://graph.microsoft.com/v1.0/me/mailFolders/{folder}/messages",
+                            headers={"Authorization": f"Bearer {access}"},
+                            params={
+                                "$top": 30,
+                                "$orderby": "receivedDateTime desc",
+                                "$select": "id,subject,receivedDateTime",
+                            },
+                            timeout=20,
+                        )
+                        if g.status_code == 200:
+                            ids |= {
+                                str(m.get("id"))
+                                for m in g.json().get("value", [])
+                                if m.get("id")
+                            }
+                    except Exception as e:
+                        log.debug("snapshot_graph_ids(%s): %s", folder, e)
 
         log.info("Baseline inbox snapshot: %s message ids", len(ids))
         return ids
@@ -606,38 +608,42 @@ class MailApiClient:
             return None
 
         try:
-            g = requests.get(
-                "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
-                headers={"Authorization": f"Bearer {access}"},
-                params={
-                    "$top": 20,
-                    "$orderby": "receivedDateTime desc",
-                    "$select": "id,subject,bodyPreview,body,from,receivedDateTime",
-                },
-                timeout=20,
-            )
+            # gộp cả Inbox lẫn Junk — mail OTP có thể rơi vào Junk
+            messages = []
+            for folder in ("inbox", "junkemail"):
+                g = requests.get(
+                    f"https://graph.microsoft.com/v1.0/me/mailFolders/{folder}/messages",
+                    headers={"Authorization": f"Bearer {access}"},
+                    params={
+                        "$top": 20,
+                        "$orderby": "receivedDateTime desc",
+                        "$select": "id,subject,bodyPreview,body,from,receivedDateTime",
+                    },
+                    timeout=20,
+                )
+                if g.status_code != 200:
+                    log.debug("ms_graph %s HTTP %s", folder, g.status_code)
+                    continue
+                for m in g.json().get("value", []):
+                    body = (m.get("body") or {}).get("content") or ""
+                    frm = (m.get("from") or {}).get("emailAddress") or {}
+                    messages.append(
+                        {
+                            "id": m.get("id") or "",
+                            "subject": m.get("subject") or "",
+                            "preview": m.get("bodyPreview") or "",
+                            "message": body,
+                            "content": body,
+                            "from": f"{frm.get('name','')} {frm.get('address','')}".strip(),
+                            "date": m.get("receivedDateTime") or "",
+                        }
+                    )
+            messages.sort(key=lambda x: str(x.get("date") or ""), reverse=True)
         except Exception as e:
             log.debug("ms_graph messages err: %s", e)
             return None
-        if g.status_code != 200:
-            log.debug("ms_graph messages HTTP %s", g.status_code)
+        if not messages:
             return None
-
-        messages = []
-        for m in g.json().get("value", []):
-            body = (m.get("body") or {}).get("content") or ""
-            frm = (m.get("from") or {}).get("emailAddress") or {}
-            messages.append(
-                {
-                    "id": m.get("id") or "",
-                    "subject": m.get("subject") or "",
-                    "preview": m.get("bodyPreview") or "",
-                    "message": body,
-                    "content": body,
-                    "from": f"{frm.get('name','')} {frm.get('address','')}".strip(),
-                    "date": m.get("receivedDateTime") or "",
-                }
-            )
         # log top subjects for debug
         for m in messages[:3]:
             log.debug(
