@@ -13,7 +13,9 @@ class HeygenToolPlugin(SiblingToolPlugin):
     temp_mails = ("2", "3")  # mọi mã temp khác (0/tmail…) → về azpop "2"
     hotmail_count_mode = "all"
     backends = ("protocol", "auto", "browser")
-    default_backend = "protocol"
+    # Protocol cần solver giải Turnstile của HeyGen (thường fail) — browser là
+    # đường ổn định, default từ 2026-08 sau khi test thật.
+    default_backend = "browser"
 
     meta = ToolMeta(
         id="heygen",
@@ -59,11 +61,11 @@ class HeygenToolPlugin(SiblingToolPlugin):
                 key="backend",
                 label="Cách reg",
                 type="select",
-                default="protocol",
+                default="browser",
                 options=[
-                    FieldOption("protocol", "HTTP không Chrome", "magic link + solver :5072"),
+                    FieldOption("browser", "Chrome ẩn", "đường ổn định — qua Turnstile trên form thật"),
+                    FieldOption("protocol", "HTTP không Chrome", "cần solver :5072 giải Turnstile HeyGen"),
                     FieldOption("auto", "Tự động", "HTTP rồi Chrome nếu fail"),
-                    FieldOption("browser", "Chrome ẩn", ""),
                 ],
             ),
         ],
