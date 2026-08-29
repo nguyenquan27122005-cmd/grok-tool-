@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -22,6 +23,7 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 LOG_DIR = ROOT / "data"
 LOG_FILE = LOG_DIR / "web_daemon.log"
+LOCK_FILE = LOG_DIR / "web_daemon.lock"
 
 
 def _py() -> Path:
@@ -53,6 +55,58 @@ def _log(msg: str) -> None:
         pass
 
 
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        r = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}"],
+            capture_output=True, text=True, errors="replace",
+        )
+        return str(pid) in (r.stdout or "")
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_single_instance() -> bool:
+    """Chặn 2 daemon chạy trùng cho cùng ROOT (spawn đôi lúc logon gây giành port).
+
+    Lock file ghi PID: daemon khác sống → exit; lock cũ (daemon đã chết) → chiếm quyền.
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    my_pid = os.getpid()
+    if LOCK_FILE.exists():
+        try:
+            old = int(LOCK_FILE.read_text(encoding="utf-8", errors="replace").strip() or 0)
+        except ValueError:
+            old = 0
+        if old and old != my_pid and _pid_alive(old):
+            return False
+    LOCK_FILE.write_text(str(my_pid), encoding="utf-8")
+    return True
+
+
+def _port_accepting(host: str, port: int, timeout: float = 2.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+        )
+    else:
+        proc.terminate()
+
+
 def run_loop(host: str, port: int) -> None:
     """Restart uvicorn forever until process is killed."""
     os.chdir(ROOT)
@@ -68,6 +122,10 @@ def run_loop(host: str, port: int) -> None:
     backoff = 2
     _log(f"daemon start host={host} port={port} py={py}")
 
+    if not _acquire_single_instance():
+        _log(f"another daemon already runs for this ROOT/port {port} — exit")
+        return
+
     while True:
         cmd = [
             py,
@@ -82,32 +140,77 @@ def run_loop(host: str, port: int) -> None:
             "info",
         ]
         _log("spawning: " + " ".join(cmd))
+        proc: subprocess.Popen | None = None
+        logf = None
+        code = 0
         try:
             # Append server stdout/stderr to daemon log
-            with open(LOG_FILE, "a", encoding="utf-8") as logf:
-                logf.write(f"\n--- uvicorn {time.strftime('%H:%M:%S')} ---\n")
-                logf.flush()
-                hide = {}
-                if os.name == "nt":
-                    from grokreg.core import winhide
+            logf = open(LOG_FILE, "a", encoding="utf-8")
+            logf.write(f"\n--- uvicorn {time.strftime('%H:%M:%S')} ---\n")
+            logf.flush()
+            hide = {}
+            if os.name == "nt":
+                from grokreg.core import winhide
 
-                    hide = winhide.kwargs(new_group=True)
-                proc = subprocess.Popen(
-                    cmd,
-                    cwd=str(ROOT),
-                    env=os.environ.copy(),
-                    stdout=logf,
-                    stderr=subprocess.STDOUT,
-                    **hide,
-                )
-                code = proc.wait()
+                hide = winhide.kwargs(new_group=True)
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT),
+                env=os.environ.copy(),
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                **hide,
+            )
+
+            # Poll thay vì wait() block: child có thể "sống mà điếc" — process
+            # còn nhưng listener chết (VD WinError 10055 cạn socket buffer khi
+            # reg job spawn Chrome) và KHÔNG BAO GIỜ exit → daemon phải probe
+            # port rồi kill + respawn, nếu không console chết âm thầm mãi mãi.
+            deaf_since: float | None = None
+            code = None
+            while True:
+                code = proc.poll()
+                if code is not None:
+                    break
+                if _port_accepting(host, port):
+                    deaf_since = None
+                elif deaf_since is None:
+                    deaf_since = time.time()
+                elif time.time() - deaf_since >= 45:
+                    _log(
+                        f"port {port} not accepting for 45s while child alive "
+                        f"(pid={proc.pid}) — kill & respawn"
+                    )
+                    _kill_tree(proc)
+                    try:
+                        code = proc.wait(timeout=15)
+                    except Exception:
+                        code = -1
+                    break
+                time.sleep(5)
             _log(f"uvicorn exit={code}")
         except KeyboardInterrupt:
             _log("daemon stopped (KeyboardInterrupt)")
+            if proc is not None and proc.poll() is None:
+                try:
+                    _kill_tree(proc)
+                except Exception:
+                    pass
             raise
         except Exception as e:
             _log(f"spawn error: {e}")
             code = 1
+            if proc is not None and proc.poll() is None:
+                try:
+                    _kill_tree(proc)
+                except Exception:
+                    pass
+        finally:
+            if logf is not None:
+                try:
+                    logf.close()
+                except Exception:
+                    pass
 
         # brief backoff before restart (crash loop protection)
         _log(f"restart in {backoff}s…")

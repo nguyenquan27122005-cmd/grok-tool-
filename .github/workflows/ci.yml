@@ -41,6 +41,7 @@ jobs:
             tests/test_hotmail_alias.py \
             tests/test_hotmail_import.py \
             tests/test_batch_resume.py \
+            tests/test_daemon_watchdog.py \
             -q --tb=short
 
   js-syntax:

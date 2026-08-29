@@ -147,7 +147,7 @@ def success_block(
     sso_token: str = "",
 ) -> None:
     """Final success block matching sample."""
-    api("🎉", "DỪNG TẠO TÀI KHOẢN GROK THÀNH CÔNG!", color="green")
+    api("🎉", "ĐÃ TẠO TÀI KHOẢN GROK THÀNH CÔNG!", color="green")
     tid = _tid()
     tag = f"{Fore.BLUE}{Style.BRIGHT}[GROK-API]{Style.RESET_ALL}"
     def row(label: str, value: str) -> None:
