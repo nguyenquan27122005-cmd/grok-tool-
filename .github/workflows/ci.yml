@@ -46,6 +46,9 @@ jobs:
   js-syntax:
     name: JS (node --check)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: grok_tool
     steps:
       - uses: actions/checkout@v4
 

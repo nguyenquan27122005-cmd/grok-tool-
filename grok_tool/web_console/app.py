@@ -462,11 +462,12 @@ def docker_action(body: DockerActionBody):
     def _do() -> None:
         try:
             if body.action == "start_daemon":
-                exe = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe"
-                if os.name == "nt" and exe.exists():
-                    subprocess.Popen([str(exe)], close_fds=True)
-                else:
-                    subprocess.run(["systemctl", "start", "docker"], timeout=30)
+                if os.name == "nt":
+                    exe = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe"
+                    if exe.exists():
+                        subprocess.Popen([str(exe)], close_fds=True)
+                        return
+                subprocess.run(["systemctl", "start", "docker"], timeout=30)
             else:
                 subprocess.run(
                     ["docker", body.action, body.name], capture_output=True,

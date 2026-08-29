@@ -113,8 +113,15 @@ class DockerActionTest(unittest.TestCase):
             launched.append(str(cmd[0]))
             return mock.MagicMock()
 
+        # Path phải mock hoàn toàn: trên Linux, Path("C:\\...") với os.name mocked "nt"
+        # sẽ cố tạo WindowsPath → NotImplementedError. Fake exe chain để test wiring.
+        fake_exe = mock.MagicMock()
+        fake_exe.exists.return_value = True
+        fake_exe.__truediv__.return_value = fake_exe
+        fake_exe.__str__.return_value = r"C:\Program Files\Docker\Docker\Docker Desktop.exe"
+
         with mock.patch(f"{_MOD}.os.name", "nt"), \
-             mock.patch.object(Path, "exists", return_value=True), \
+             mock.patch(f"{_MOD}.Path", mock.MagicMock(return_value=fake_exe)), \
              mock.patch(f"{_MOD}.subprocess.Popen", side_effect=fake_popen), \
              mock.patch(f"{_MOD}.threading.Thread", _InlineThread):
             res = self._run("start_daemon")
