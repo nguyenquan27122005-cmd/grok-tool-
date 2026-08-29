@@ -9,12 +9,14 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from web_console.plugins import all_plugins
+from web_console.plugins.sibling import SiblingToolPlugin
 
 # argv tail = cmd[3:] (bỏ python -u main.py / canva_tool.py)
 GOLDEN: dict[str, list[tuple[dict, list[str]]]] = {
@@ -130,6 +132,13 @@ EXPECTED_ENV = [
 
 class GoldenCommandTest(unittest.TestCase):
     def setUp(self) -> None:
+        # build_command với mail Hotmail đọc pool acc thật (file local, không
+        # commit). Mock pool để golden test chỉ đo shape argv — deterministic.
+        patcher = mock.patch.object(
+            SiblingToolPlugin, "hotmail_pool", return_value={"slots": 10},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.plugins = all_plugins()
 
     def test_build_commands_unchanged(self) -> None:

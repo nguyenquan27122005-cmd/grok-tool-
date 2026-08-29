@@ -20,8 +20,13 @@ for p in (str(GROK_ROOT), str(NETFLIX_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from nfreg import worker as nw
-from nfreg.stop import StopRequested
+try:
+    from nfreg import worker as nw
+    from nfreg.stop import StopRequested
+except ImportError:
+    # Repo public chỉ publish grok_tool (gitignore "/*") — CI checkout không có
+    # thư mục sibling netflix/. Skip nguyên module; vẫn chạy đầy đủ ở máy local.
+    raise unittest.SkipTest("nfreg (thư mục sibling netflix/) không có trong checkout")
 
 
 def _mk_result(ok: bool, email: str = "a@b.c") -> nw.Result:

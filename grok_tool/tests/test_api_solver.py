@@ -68,7 +68,8 @@ class SolverActionTest(unittest.TestCase):
         self.assertEqual(start.call_args.kwargs["force"], True)
 
     def test_stop_calls_manager_stop(self) -> None:
-        with mock.patch(f"{_MOD}.threading.Thread", _InlineThread), \
+        with mock.patch(f"{_MOD}.load_config", return_value={}), \
+             mock.patch(f"{_MOD}.threading.Thread", _InlineThread), \
              mock.patch(f"{_MOD}.solver_manager.stop") as stop:
             res = self._run("stop")
         self.assertTrue(res["ok"])
