@@ -9,7 +9,9 @@ from .sibling import SiblingToolPlugin
 class ZaiToolPlugin(SiblingToolPlugin):
     sibling_dir = "zai"
     stop_pkg = "zaireg"
-    default_mail = "4"
+    # z.ai chặn domain temp (EMAIL_DOMAIN_BLOCKED với guerrilla/azpop) —
+    # Hotmail là đường ổn định, default từ 2026-08 sau khi test thật.
+    default_mail = "1"
     temp_mails = ("2", "4")
     hotmail_count_mode = "want"
     forced_backend = "protocol"
@@ -26,11 +28,11 @@ class ZaiToolPlugin(SiblingToolPlugin):
                 key="mail",
                 label="Loại email",
                 type="select",
-                default="4",
+                default="1",
                 options=[
-                    FieldOption("4", "Temp Guerrilla", "inbox temp"),
-                    FieldOption("2", "Temp Azpop", ""),
-                    FieldOption("1", "Hotmail", "pool chung với Grok"),
+                    FieldOption("1", "Hotmail", "pool chung với Grok — z.ai chặn domain temp"),
+                    FieldOption("4", "Temp Guerrilla", "z.ai chặn domain — hay fail"),
+                    FieldOption("2", "Temp Azpop", "z.ai chặn domain — hay fail"),
                 ],
             ),
             ToolField(

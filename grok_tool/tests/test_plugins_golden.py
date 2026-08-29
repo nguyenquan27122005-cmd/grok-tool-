@@ -62,7 +62,8 @@ GOLDEN: dict[str, list[tuple[dict, list[str]]]] = {
     "zai": [
         ({"mail": "4", "count": 3, "backend": "protocol"}, ["4", "--count", "3", "--backend", "protocol"]),
         ({"mail": "2", "count": 1, "backend": "browser"}, ["2", "--count", "1", "--backend", "protocol"]),
-        ({"mail": "3", "count": 1}, ["4", "--count", "1", "--backend", "protocol"]),
+        # mail lạ → default "1" (Hotmail) — z.ai chặn domain temp từ 2026-08
+        ({"mail": "3", "count": 1}, ["1", "--count", "1", "--backend", "protocol"]),
     ],
     "manus": [
         ({"mail": "2", "count": 3, "backend": "browser"}, ["2", "--count", "3", "--backend", "browser"]),
