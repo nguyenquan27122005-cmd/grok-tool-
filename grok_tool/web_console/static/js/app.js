@@ -790,14 +790,41 @@ function bindRegisterPage(root, tool) {
   root.querySelectorAll('[data-tool]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const t = (state.tools || []).find((x) => x.id === btn.dataset.tool);
-      // Tool có web riêng (GPT-TOOL :8083) → chọn tile là nhảy sang luôn.
-      // window.open phải chạy trước mọi await để không bị popup blocker chặn.
+      // Tool có web riêng (GPT-TOOL :8083): window.open phải chạy trước mọi
+      // await để không bị popup blocker chặn. Service chưa chạy thì TỰ START
+      // job rồi chờ nó lên — trước đây chỉ toast bảo user "bấm Start" trong
+      // khi bấm tile không bao giờ start => bế tắc vòng tròn.
       if (t && t.external_url) {
         const w = window.open(t.external_url, '_blank', 'noopener');
-        fetch(t.external_url, { mode: 'no-cors', cache: 'no-store' }).catch(() => {
-          try { if (w) w.close(); } catch (_) {}
-          toast('GPT-TOOL :8083 chưa chạy — bấm Start ở tool GPT / OpenAI để bật service', 'err');
-        });
+        const alive = () => fetch(t.external_url, { mode: 'no-cors', cache: 'no-store' })
+          .then(() => true).catch(() => false);
+        if (!(await alive())) {
+          toast('GPT-TOOL :8083 chưa chạy — tự Start service…', 'info');
+          try {
+            const res = await fetch('/api/jobs/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tool_id: t.id, params: {} }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              toast('Không Start được: ' + (body.detail || res.status), 'err');
+            }
+          } catch (e) {
+            toast('Không Start được: ' + e, 'err');
+          }
+          let up = false;
+          for (let i = 0; i < 10; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            if (await alive()) { up = true; break; }
+          }
+          if (up) {
+            try { if (w) w.location.href = t.external_url; } catch (_) { /* tab đóng sớm — dùng nút Mở GPT-TOOL ↗ */ }
+            toast('GPT-TOOL đã bật ở :8083', 'ok');
+          } else {
+            toast('GPT-TOOL chưa lên sau 20s — job có thể đang chờ hàng đợi, xem tab Jobs', 'err');
+          }
+        }
       }
       const next = btn.dataset.tool;
       if (next === state.selectedTool) return;
