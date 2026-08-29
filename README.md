@@ -26,6 +26,7 @@
 - [Cách dùng nhanh](#cách-dùng-nhanh)
 - [VS Code + API key Sub2API](#vs-code--api-key-sub2api)
 - [Ba backend](#ba-backend)
+- [Stealth browser tùy chọn (CloakBrowser)](#stealth-browser-tùy-chọn-cloakbrowser)
 - [CLI](#cli)
 - [Web UI](#web-ui)
 - [Turnstile solver](#turnstile-solver)
@@ -51,7 +52,7 @@ Chi tiết: [Usage](grok_tool/docs/USAGE.md) · [VS Code + API key Sub2API](grok
 | **Sub2API** | SSO → `POST /api/v1/admin/grok/sso-to-oauth`, tên `grok free NNN` |
 | **Google Sheet** | Tùy chọn, Apps Script webapp — tắt mặc định |
 | **Web control plane** | Aurora UI tại `http://127.0.0.1:8787` |
-| **Multi-tool** | Plugin registry: grok, netflix, capcut, dreamina, zai, manus, notion, claude, canva, chatgpt, gpt, heygen, sibling… |
+| **Multi-tool** | Plugin registry: grok, netflix, capcut, dreamina, zai, manus, notion, claude, canva, chatgpt, gpt, heygen, genspark, sibling… |
 | **Quản lý Docker** | Trang Cài đặt: bật Docker Desktop + start/stop/restart container Sub2API |
 | **Ops tự động** | Dashboard, backup hàng ngày, health-check acc, notifier (Telegram/webhook), proxy pool dùng chung |
 | **Dừng an toàn** | `ESC` · `Ctrl+C` · file `data/STOP` · nút Stop trên web |
@@ -190,6 +191,30 @@ User/pass admin trong config chỉ để tool import. Đừng commit key.
 | **auto** | `--backend auto` | tùy | Solver + Chrome | Thử HTTP, fail thì fallback Chrome |
 
 Web mặc định **protocol**. CLI không truyền `--backend` thì đọc `reg_backend` trong config (mặc định browser).
+
+---
+
+## Stealth browser tùy chọn (CloakBrowser)
+
+Backend browser hỗ trợ chạy bằng **binary Chromium-compatible bất kỳ** qua config:
+
+```json
+"chrome_binary": "C:\\path\\to\\cloakbrowser\\chrome.exe"
+```
+
+- Để trống → dùng Chrome mặc định (như trước, không đổi gì).
+- Binary không tồn tại → tự fallback Chrome mặc định + cảnh báo log, batch không chết.
+- Toàn bộ flow (anti-flag, CF click, OTP, page flow) dùng lại nguyên vẹn — chỉ thay engine.
+
+**Ví dụ: [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)** — Chromium stealth patch ở mức C++ (73 patch: canvas/WebGL/WebRTC/CDP signals), `humanize` mouse/keyboard:
+
+```bat
+pip install cloakbrowser
+python -m cloakbrowser install
+:: rồi trỏ "chrome_binary" vào chrome.exe trong thư mục CloakBrowser đã tải
+```
+
+> ⚠️ **Lưu ý license:** wrapper CloakBrowser là MIT, nhưng **binary Chromium là proprietary** (BINARY-LICENSE) — có license-validation phone-home về server CloakHQ, giám sát số session, và **không cho redistribution**. Nghĩa là: binary chỉ dùng local, **không commit vào repo này**, và bạn chấp nhận điều khoản của CloakHQ khi dùng. "Pass mọi bot test" là benchmark generic — không bảo đảm qua được anti-bot riêng của xAI; hãy test với 1 acc trước khi bật batch.
 
 ---
 

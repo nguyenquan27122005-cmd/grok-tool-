@@ -102,6 +102,21 @@ def build_chrome_options(
     Default (anti-flag): fresh clean user-data-dir every account.
     """
     options = ChromiumOptions()
+
+    # Chromium-compatible binary tùy chọn (VD: build stealth như CloakBrowser).
+    # Để trống → dùng Chrome/Chromium mặc định của máy. Binary thiếu → bỏ qua
+    # kèm cảnh báo, không làm chết batch.
+    binary = str(config.get("chrome_binary") or "").strip()
+    if binary:
+        if Path(binary).is_file():
+            options.binary_path = binary
+            log.info("Custom chrome binary: %s", binary)
+        else:
+            log.warning(
+                "chrome_binary không tồn tại — bỏ qua, dùng Chrome mặc định: %s",
+                binary,
+            )
+
     fp = fingerprint or af.pick_fingerprint(config)
     config["_fingerprint"] = fp
 

@@ -23,6 +23,7 @@ data/*
 **/vpn_by_email.json
 **/STOP
 **/*secret*
+!**/check_no_secrets.py
 **/*credential*
 **/*token*.json
 **/cookies*.txt

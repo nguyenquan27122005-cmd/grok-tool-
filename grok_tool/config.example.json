@@ -14,6 +14,7 @@
   "fresh_profile_per_account": false,
   "reuse_chrome_profile": true,
   "chrome_user_data_dir": "chrome_profile_v3",
+  "chrome_binary": "",
   "chrome_debug_port": 9333,
   "keep_browser_open": false,
   "force_guest_on_start": true,
