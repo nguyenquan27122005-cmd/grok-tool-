@@ -17,6 +17,7 @@ from .claude import ClaudeToolPlugin
 from .gpt import GptToolPlugin
 from .dreamina import DreaminaToolPlugin
 from .chatgpt import ChatgptToolPlugin
+from .genspark import GensparkToolPlugin
 
 
 _BRAND_COLORS = {
@@ -59,6 +60,7 @@ def all_plugins() -> Dict[str, BaseToolPlugin]:
         GptToolPlugin(),
         DreaminaToolPlugin(),
         ChatgptToolPlugin(),
+        GensparkToolPlugin(),
         # Icon: drop official mark at static/img/brands/{id}.svg — see brands/README.md
     ]
     return {p.meta.id: p for p in plugins}

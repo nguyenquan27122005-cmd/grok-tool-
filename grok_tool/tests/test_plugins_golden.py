@@ -93,6 +93,14 @@ GOLDEN: dict[str, list[tuple[dict, list[str]]]] = {
          ["redeem", "--accounts", "data/accounts.txt", "--codes", "data/codes_web.txt",
           "--threads", "4", "--output", "data/proof.json", "--success-only"]),
     ],
+    "genspark": [
+        ({"mail": "1", "count": 2, "backend": "browser"}, ["1", "--count", "2", "--backend", "browser"]),
+        ({"mail": "3", "count": 1, "backend": "gpm"}, ["3", "--count", "1", "--backend", "gpm"]),
+        ({"mail": "0", "count": 1, "backend": "protocol"}, ["0", "--count", "1", "--backend", "protocol"]),
+        ({"mail": "4", "count": 1, "backend": "weird"}, ["4", "--count", "1", "--backend", "browser"]),
+        ({"mail": "5", "count": 1, "backend": "browser", "custom_domain": "nguyenquan.dpdns.org"},
+         ["5", "--count", "1", "--backend", "browser", "--custom-domain", "nguyenquan.dpdns.org"]),
+    ],
 }
 
 EXPECTED_CWD = {
@@ -107,6 +115,7 @@ EXPECTED_CWD = {
     "claude": "claude",
     "canva": "canva",
     "chatgpt": "chatgpt",
+    "genspark": "genspark",
 }
 
 EXPECTED_ENV = [
@@ -114,6 +123,8 @@ EXPECTED_ENV = [
     ("capcut", {"invite": "", "claim_offer": True}, {"CAPCUT_CLAIM": "1"}),
     ("manus", {"invite": "INV9"}, {"MANUS_INVITE": "INV9"}),
     ("notion", {"partner": "P7"}, {"NOTION_PARTNER": "P7"}),
+    ("genspark", {"claim_free_month": False}, {"GENSPARK_CLAIM": "0"}),
+    ("genspark", {"claim_free_month": True}, {"GENSPARK_CLAIM": "1"}),
 ]
 
 

@@ -98,7 +98,7 @@ function isHotmailMail(val) {
   return v === '1' || v === 'hotmail' || v === 'outlook' || v === 'ms';
 }
 
-const SHEET_ONLY = ['heygen', 'capcut', 'zai', 'canva', 'netflix', 'manus', 'notion'];
+const SHEET_ONLY = ['heygen', 'capcut', 'zai', 'canva', 'netflix', 'manus', 'notion', 'genspark'];
 const HAS_HOTMAIL = ['grok', ...SHEET_ONLY.filter((id) => id !== 'notion')];
 
 function isSheetOnly(id) {
@@ -112,7 +112,7 @@ function hasHotmailPool(id) {
 function brandIconSrc(t) {
   const src = t.brand_icon || `/static/img/brands/${t.id}.svg`;
   if (!src) return src;
-  return src.includes('?') ? src : `${src}?v=1.59`;
+  return src.includes('?') ? src : `${src}?v=1.61`;
 }
 
 function brandIconHtml(t) {

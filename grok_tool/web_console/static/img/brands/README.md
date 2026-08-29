@@ -32,3 +32,4 @@ Muốn file khác: `ToolMeta.brand_icon = "/static/img/brands/foo.svg"`
 | manus | Icon chính thức manus.im/brand (glyph tay trên nền trắng) |
 | notion | Cube N chính thức (Notion Labs) trên nền trắng |
 | dreamina | Favicon chính thức dreamina.capcut.com (mark 900×900) |
+| genspark | Official square mark (3 spark + bar) từ genspark.ai/brand/genspark `icon-square.svg` · fallback `apple-touch-icon.png` |
