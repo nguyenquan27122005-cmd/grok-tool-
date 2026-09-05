@@ -84,3 +84,7 @@
 *-account.txt
 **/tmp_*.py
 **/tmp_*.json
+
+# ==== the tin dung — tuyet doi khong len git ====
+**/cards.txt
+**/pay_results.txt

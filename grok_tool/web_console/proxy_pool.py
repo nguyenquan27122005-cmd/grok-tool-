@@ -184,24 +184,24 @@ def get_state() -> dict[str, Any]:
 
 
 def sync_kiotproxy(state: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
-    """Kéo pool từ KiotProxy vào ``proxies`` khi tới hạn (TTL, mặc định 30').
+    """Kéo proxy từ KiotProxy vào ``proxies`` khi hết hạn/không có.
 
     Creds đọc từ ``store['kiotproxy']`` hoặc ``grok_tool/data/kiotproxy.json``
     (1 file chung cho cả console lẫn CLI trực tiếp). Lỗi → giữ pool cũ, thử
     lại sau 5 phút. Trả về state (đã cập nhật hoặc nguyên vẹn)."""
     global _kp_last_try
     creds = state.get("kiotproxy") or {}
-    if not creds.get("email"):
+    if not creds.get("key"):
         try:
             f = STORE_PATH.parent / "kiotproxy.json"
             if f.exists():
                 creds = json.loads(f.read_text(encoding="utf-8")) or {}
         except Exception:  # noqa: BLE001
             creds = {}
-    if not creds.get("email") or not creds.get("password"):
+    if not creds.get("key"):
         return state
     now = time.time()
-    ttl = float(creds.get("ttl_min") or 30) * 60
+    ttl = float(creds.get("ttl_min") or 18) * 60
     if not force and state["proxies"] and now - _kp_last_ok < ttl:
         return state
     if not force and now - _kp_last_try < 300:
@@ -209,7 +209,7 @@ def sync_kiotproxy(state: dict[str, Any], *, force: bool = False) -> dict[str, A
     try:
         from grokreg.core import kiotproxy as kp
 
-        pool = kp.fetch_pool(state.get("kiotproxy") or None)
+        pool, _expires = kp.fetch_pool(state.get("kiotproxy") or None)
         if pool:
             state["proxies"] = pool
             state["cursor"] = 0

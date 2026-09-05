@@ -50,9 +50,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--accounts", default="data/accounts.txt", help="Checkout: file account")
     p.add_argument("--out", default="data/checkout_links.txt", help="Checkout: file ghi link")
     p.add_argument("--gsheet", action="store_true", help="Checkout: đẩy link vào Google Sheet (tab <tool>_checkout)")
+    # pay mode — điền card CỦA MÌNH vào Stripe checkout
+    p.add_argument("--cards", default="data/cards.txt", help="Pay: file card PAN|MM|YY|CVC|tên|zip")
+    p.add_argument("--limit", type=int, default=0, help="Pay: số account tối đa (0 = tất cả)")
+    p.add_argument("--show", action="store_true", help="Pay: hiện browser để debug")
     args = p.parse_args(argv)
 
-    if (args.mail or "").strip().lower() == "checkout":
+    mode = (args.mail or "").strip().lower()
+    if mode == "checkout":
         from oareg.checkout import run_checkout
         from oareg.stop import StopRequested
 
@@ -62,6 +67,20 @@ def main(argv: list[str] | None = None) -> int:
             run_checkout(None, plans=plans, interval=args.interval,
                          accounts_path=ROOT / args.accounts, out_path=ROOT / args.out,
                          push_sheet=bool(args.gsheet))
+        except StopRequested as e:
+            log.info("Stop: %s", e.reason)
+        return 0
+
+    if mode == "pay":
+        from oareg.pay import run_pay
+        from oareg.stop import StopRequested
+
+        clear_stop()
+        plans = [x.strip().lower() for x in str(args.plans).split(",") if x.strip()]
+        try:
+            run_pay(plans, args.interval, accounts_path=ROOT / args.accounts,
+                    cards_path=ROOT / args.cards, limit=int(args.limit or 0),
+                    show=bool(args.show))
         except StopRequested as e:
             log.info("Stop: %s", e.reason)
         return 0

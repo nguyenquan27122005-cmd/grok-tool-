@@ -1,18 +1,19 @@
-"""KiotProxy — kéo pool proxy vào ``proxy_pool`` cho MỌI tool sibling.
+"""KiotProxy — kéo proxy theo KEY vào ``proxy_pool`` cho MỌI tool sibling.
 
 Cấu hình chung 1 chỗ: ``grok_tool/data/kiotproxy.json``
-  {"email": "...", "password": "...", "key": "Kd1fb...", "ttl_min": 30}
-(tool nào cũng đọc được qua ensure_grok_on_path; file nằm trong data/**
-nên không bao giờ lên git.)
+  {"key": "Kd1fb...", "region": "random", "ttl_min": 18}
+(key là đủ — API v1 của KiotProxy không cần login account; region
+bac/trung/nam/random, ttl_min =每隔 bao lâu thì kéo IP mới.)
 
-``next_proxy`` gọi ``sync_if_needed`` tự động: pool cạn hoặc quá TTL → login
-lấy Bearer → GET /api/management/kp/proxy/list → ghi đè ``proxy_pool`` trong
-config (in-place, thread-safe). API lỗi thì giữ pool cũ, thử lại sau 5 phút.
+``next_proxy`` gọi ``sync_if_needed`` tự động: proxy hết hạn/không có → gọi
+``/api/v1/proxies/current`` (rồi ``/proxies/new`` nếu chưa gán) → ghi đè
+``proxy_pool`` trong config (in-place, thread-safe). Lỗi giữ pool cũ, thử lại
+sau 5 phút. Console (web_console.proxy_pool) cũng tự sync cùng nguồn.
 
-API (JHipster-style, đã dò từ bundle app.kiotproxy.com):
-  POST /api/authenticate {username, password} → id_token
-  GET  /api/management/kp/proxy/list?page&size  (Bearer id_token)
-Key mua (vd Kd1fb...) chỉ là định danh gói — list proxy theo account.
+API (tài liệu chính thức app.kiotproxy.com/access/api-documentation):
+  GET /api/v1/proxies/current?key=   → proxy đang gán (404-ish nếu chưa có)
+  GET /api/v1/proxies/new?key=&region= → đổi/lấy mới (giới hạn bởi ttc)
+  data.http = "ip:port" (HTTP), ttl 1200s — 1 key giữ 1 IP tại một thời điểm.
 """
 from __future__ import annotations
 
@@ -40,7 +41,7 @@ def _shared() -> Path:
 
 def _creds(config: dict[str, Any] | None) -> dict[str, Any]:
     cfg = dict((config or {}).get("kiotproxy") or {})
-    if not cfg.get("email"):
+    if not cfg.get("key"):
         f = _shared() / "kiotproxy.json"
         if f.exists():
             try:
@@ -50,87 +51,47 @@ def _creds(config: dict[str, Any] | None) -> dict[str, Any]:
     return cfg
 
 
-def _login(creds: dict[str, Any]) -> str:
-    import requests
+def fetch_pool(config: dict[str, Any] | None = None) -> tuple[list[str], float]:
+    """Lấy proxy hiện tại của key (chưa gán thì đổi mới theo region).
 
-    r = requests.post(
-        f"{_BASE}/authenticate",
-        json={"username": creds.get("email"), "password": creds.get("password")},
-        timeout=20,
-    )
-    body = r.json() or {}
-    if not body.get("success"):
-        raise RuntimeError(f"kiotproxy login: {str(body.get('message') or r.status_code)[:120]}")
-    data = body.get("data") or {}
-    return str(data.get("id_token") or data.get("token") or "")
-
-
-def _row_url(row: dict[str, Any], key: str) -> str:
-    host = next((str(row[k]) for k in ("host", "ip", "address", "server", "proxyHost") if row.get(k)), "")
-    port = next((row[k] for k in ("port", "proxyPort") if row.get(k)), "")
-    if not host or not port:
-        raw = next((str(row[k]) for k in ("proxy", "url", "endpoint") if row.get(k)), "")
-        return raw.strip()
-    user = next((str(row[k]) for k in ("username", "user") if row.get(k)), "")
-    pwd = next((str(row[k]) for k in ("password", "pass") if row.get(k)), "")
-    if not user and key:
-        user, pwd = key, key  # vài nhà cung cấp dùng key làm user/pass
-    auth = f"{user}:{pwd}@" if (user and pwd) else ""
-    scheme = "socks5" if int(port) in (1080, 1081) or str(row.get("type", "")).lower() == "socks5" else "http"
-    return f"{scheme}://{auth}{host}:{port}"
-
-
-def fetch_pool(config: dict[str, Any] | None = None) -> list[str]:
-    """Login + kéo list proxy (theo key nếu đặt). Ném exception khi lỗi."""
+    Trả về ``(pool, expires_at_epoch_sec)`` — pool có 0 hoặc 1 proxy (1 key = 1 IP).
+    Ném exception khi lỗi API."""
     import requests
 
     creds = _creds(config)
-    if not creds.get("email") or not creds.get("password"):
-        raise RuntimeError("thiếu kiotproxy email/password")
-    token = _login(creds)
+    key = str(creds.get("key") or "").strip()
+    if not key:
+        raise RuntimeError("thiếu kiotproxy key")
     s = requests.Session()
     s.trust_env = False
-    s.headers["Authorization"] = f"Bearer {token}"
-    key = str(creds.get("key") or "")
-    pool: list[str] = []
-    for page in range(3):
+    body: dict[str, Any] = {}
+    for attempt in (2, 1):
         r = s.get(
-            f"{_BASE}/management/kp/proxy/list",
-            params={"page": page, "size": 100},
+            f"{_BASE}/v1/proxies/current" if attempt == 2 else f"{_BASE}/v1/proxies/new",
+            params={"key": key, **({"region": str(creds.get("region") or "random")} if attempt == 1 else {})},
             timeout=20,
         )
         body = r.json() or {}
-        rows = (body.get("data") or {})
-        rows = rows.get("content") if isinstance(rows, dict) else rows
-        if not rows:
+        if body.get("success") and (body.get("data") or {}).get("http"):
             break
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            if key and str(row.get("key") or row.get("keyId") or "") not in (key, ""):
-                continue
-            u = _row_url(row, key)
-            if u:
-                pool.append(u)
-        if len(rows) < 100:
-            break
-    if not pool:
-        (Path(_shared()) / "kiotproxy_last.json").write_text(
-            json.dumps(body, ensure_ascii=False, default=str)[:20000], encoding="utf-8"
-        )
-    return sorted(set(pool))
+        if str(body.get("error") or "") != "PROXY_NOT_FOUND_BY_KEY":
+            break  # lỗi khác (key sai, đang hạn chế ttc…) — không thử /new nữa
+    if not (body.get("success") and (body.get("data") or {}).get("http")):
+        raise RuntimeError(str(body.get("message") or body.get("error") or r.status_code)[:140])
+    data = body["data"]
+    expires = float(data.get("expirationAt") or 0) / 1000.0
+    return [f"http://{data['http']}"], expires
 
 
 def sync_if_needed(config: dict[str, Any], *, force: bool = False) -> list[str]:
-    """Đồng bộ pool KiotProxy vào ``config['proxy_pool']`` nếu đến hạn.
+    """Đồng bộ pool KiotProxy vào ``config['proxy_pool']`` nếu hết hạn/không có.
 
-    Trả về pool hiện hành (KiotProxy hoặc pool tĩnh cũ). Không bao giờ ném —
-    lỗi chỉ log và giữ pool cũ."""
+    Không bao giờ ném — lỗi chỉ log và giữ pool cũ."""
     global _LAST_TRY
     creds = _creds(config)
-    if not creds.get("email"):
+    if not creds.get("key"):
         return [str(p).strip() for p in (config.get("proxy_pool") or []) if str(p).strip()]
-    ttl = float(creds.get("ttl_min") or 30) * 60
+    ttl_min = float(creds.get("ttl_min") or 18)
     cache = _shared() / "kiotproxy_pool.json"
     with _LOCK:
         now = time.time()
@@ -138,7 +99,9 @@ def sync_if_needed(config: dict[str, Any], *, force: bool = False) -> list[str]:
             if cache.exists():
                 try:
                     d = json.loads(cache.read_text(encoding="utf-8"))
-                    if now - float(d.get("ts") or 0) < ttl and d.get("pool"):
+                    fresh = now < float(d.get("expires_at") or 0) - 60
+                    young = now - float(d.get("ts") or 0) < ttl_min * 60
+                    if (fresh or young) and d.get("pool"):
                         config["proxy_pool"] = list(d["pool"])
                         return list(d["pool"])
                 except Exception:
@@ -147,12 +110,14 @@ def sync_if_needed(config: dict[str, Any], *, force: bool = False) -> list[str]:
                 return [str(p).strip() for p in (config.get("proxy_pool") or []) if str(p).strip()]
         _LAST_TRY = now
         try:
-            pool = fetch_pool(config)
+            pool, expires = fetch_pool(config)
             if pool:
                 cache.write_text(
-                    json.dumps({"ts": now, "pool": pool}, ensure_ascii=False), encoding="utf-8"
+                    json.dumps({"ts": now, "pool": pool, "expires_at": expires}, ensure_ascii=False),
+                    encoding="utf-8",
                 )
                 config["proxy_pool"] = pool
+                print(f"[kiotproxy] pool: {pool[0].split('@')[-1]}", flush=True)
                 return pool
         except Exception as e:
             print(f"[kiotproxy] sync: {str(e)[:140]}", flush=True)
