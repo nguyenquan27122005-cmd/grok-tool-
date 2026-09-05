@@ -14,11 +14,16 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 STORE_PATH = ROOT / "data" / "proxy_pool.json"
+
+# KiotProxy auto-sync state (creds ở store['kiotproxy'] hoặc data/kiotproxy.json)
+_kp_last_try = 0.0
+_kp_last_ok = 0.0
 
 GPTTOOL_URL = "http://127.0.0.1:8083"
 GPT_CONFIG_TIMEOUT = 4.0
@@ -175,7 +180,47 @@ def mask(proxy: str) -> str:
 
 def get_state() -> dict[str, Any]:
     with _lock:
-        return _load()
+        return sync_kiotproxy(_load())
+
+
+def sync_kiotproxy(state: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+    """Kéo pool từ KiotProxy vào ``proxies`` khi tới hạn (TTL, mặc định 30').
+
+    Creds đọc từ ``store['kiotproxy']`` hoặc ``grok_tool/data/kiotproxy.json``
+    (1 file chung cho cả console lẫn CLI trực tiếp). Lỗi → giữ pool cũ, thử
+    lại sau 5 phút. Trả về state (đã cập nhật hoặc nguyên vẹn)."""
+    global _kp_last_try
+    creds = state.get("kiotproxy") or {}
+    if not creds.get("email"):
+        try:
+            f = STORE_PATH.parent / "kiotproxy.json"
+            if f.exists():
+                creds = json.loads(f.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001
+            creds = {}
+    if not creds.get("email") or not creds.get("password"):
+        return state
+    now = time.time()
+    ttl = float(creds.get("ttl_min") or 30) * 60
+    if not force and state["proxies"] and now - _kp_last_ok < ttl:
+        return state
+    if not force and now - _kp_last_try < 300:
+        return state
+    try:
+        from grokreg.core import kiotproxy as kp
+
+        pool = kp.fetch_pool(state.get("kiotproxy") or None)
+        if pool:
+            state["proxies"] = pool
+            state["cursor"] = 0
+            _save(state)
+            _kp_last_ok = now
+            print(f"[proxy-pool] kiotproxy: {len(pool)} proxy", flush=True)
+    except Exception as exc:  # noqa: BLE001 — pool cũ vẫn dùng được
+        print(f"[proxy-pool] kiotproxy sync fail: {str(exc)[:140]}", flush=True)
+    finally:
+        _kp_last_try = now
+    return state
 
 
 def validate_lines(text: str) -> list[str]:
