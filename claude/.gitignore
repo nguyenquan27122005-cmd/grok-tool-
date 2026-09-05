@@ -1,0 +1,10 @@
+config.json
+data/accounts.txt
+data/STOP
+data/last_*.json
+data/*.png
+chrome_runs/
+chrome_profile/
+__pycache__/
+*.pyc
+venv/

@@ -1,0 +1,58 @@
+{
+  "email_provider": "auto_temp",
+  "temp_mail_order": ["azpopmail", "tmail_wibu"],
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Heygen@2026!Safe",
+  "password_length": 16,
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "inter_success_delay_min": 8,
+  "inter_success_delay_max": 20,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "protocol",
+  "signup_url": "https://auth.heygen.com/signup",
+  "app_url": "https://app.heygen.com/",
+  "headless": false,
+  "chrome_user_data_dir": "chrome_profile",
+  "chrome_debug_port": 9444,
+  "chrome_window_mode": "offscreen",
+  "chrome_window_position": "-2400,40",
+  "fresh_profile_per_account": true,
+  "proxy": "",
+  "onboarding": {
+    "role": "Other",
+    "industry": "Other",
+    "company_size": "1-10"
+  },
+  "turnstile": {
+    "solver_url": "http://127.0.0.1:5072",
+    "yescaptcha_key": "",
+    "timeout_sec": 60
+  },
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "tmail_wibu": {
+    "base_url": "https://tmail.wibucrypto.pro",
+    "verify_ssl": true,
+    "create_mode": "create",
+    "poll_interval": 2
+  },
+  "mail_api": {
+    "enabled": true,
+    "client_id": "",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "web_port": 8788,
+  "google_sheets": {
+    "enabled": true,
+    "tab": "heygen",
+    "spreadsheet_id": "",
+    "webapp_url": "",
+    "webapp_secret": ""
+  }
+}

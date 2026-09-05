@@ -1,0 +1,38 @@
+{
+  "email_provider": "hotmail",
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Netflix@2026!Safe",
+  "password_length": 16,
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "inter_success_delay_min": 8,
+  "inter_success_delay_max": 20,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "browser",
+  "signup_url": "https://www.netflix.com/signup",
+  "login_url": "https://www.netflix.com/login",
+  "planform_url": "https://www.netflix.com/signup/planform",
+  "headless": false,
+  "chrome_user_data_dir": "chrome_profile",
+  "chrome_debug_port": 9544,
+  "chrome_window_mode": "offscreen",
+  "chrome_window_position": "-2400,40",
+  "fresh_profile_per_account": true,
+  "proxy": "",
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "mail_api": {
+    "enabled": true,
+    "client_id": "",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "google_sheets": {
+    "enabled": true,
+    "tab": "netflix"
+  }
+}

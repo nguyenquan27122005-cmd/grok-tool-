@@ -1,0 +1,39 @@
+{
+  "email_provider": "guerrilla",
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Dreamina@2026!Safe",
+  "password_length": 16,
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "inter_success_delay_min": 8,
+  "inter_success_delay_max": 20,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "protocol",
+  "app_id": "513641",
+  "api_base": "https://www.capcut.com",
+  "otp_type": "34",
+  "proxy": "",
+  "claim_offer": false,
+  "check_credits": true,
+  "invite_code": "",
+  "share_uid": "",
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "mail_api": {
+    "enabled": true,
+    "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "google_sheets": {
+    "enabled": true,
+    "tab": "dreamina",
+    "spreadsheet_id": "1SeghtwP7_AgwPyH8fSXiUWsW6zbf8R0_HmkfEHtf_GI"
+  },
+  "region_secret": "aDy0TUhtql92P7hScCs97YWMT-jub2q9",
+  "tool_label": "DREAMINA"
+}

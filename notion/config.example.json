@@ -1,0 +1,67 @@
+{
+  "email_provider": "tmail_wibu",
+  "tmail_wibu": {
+    "base_url": "https://tmail.wibucrypto.pro",
+    "verify_ssl": true,
+    "create_mode": "create",
+    "poll_interval": 2,
+    "domains": [
+      "baron.name.ng",
+      "begin.name.ng",
+      "ames.name.ng",
+      "amex.name.ng",
+      "axon.name.ng",
+      "aden.name.ng"
+    ],
+    "skip_domains": [
+      "wibucrypto.pro",
+      "aban.edu.vn",
+      "kaneapp.top",
+      "codedcapcut.email"
+    ],
+    "skip_suffixes": []
+  },
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Notion@2026!Safe",
+  "password_length": 16,
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "inter_success_delay_min": 8,
+  "inter_success_delay_max": 20,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "auto",
+  "signup_url": "https://www.notion.so/signup",
+  "claim_offer": true,
+  "until_success": false,
+  "until_offer": false,
+  "sheet_all_success": false,
+  "startup": {
+    "apply_url": "https://www.notion.so/startups-apply",
+    "partner_code": "",
+    "company_name": "",
+    "company_website": ""
+  },
+  "headless": false,
+  "chrome_user_data_dir": "chrome_profile",
+  "chrome_debug_port": 9744,
+  "chrome_window_mode": "offscreen",
+  "chrome_window_position": "-2400,40",
+  "fresh_profile_per_account": true,
+  "proxy": "",
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "mail_api": {
+    "enabled": true,
+    "client_id": "",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "google_sheets": {
+    "enabled": true,
+    "tab": "notion"
+  }
+}

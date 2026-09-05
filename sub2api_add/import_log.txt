@@ -1,0 +1,17 @@
+2026-08-10 20:32:58 | INFO | loaded 1 success accounts from D:\grok_tool\sub2api_add\demo_accounts.txt
+2026-08-10 20:33:01 | INFO | [sub2api] open http://localhost:8080/admin/accounts
+2026-08-10 20:33:05 | INFO | [sub2api] login as admin@sub2api.local
+2026-08-10 20:33:12 | INFO | [sub2api] on accounts page: http://localhost:8080/admin/accounts
+2026-08-10 20:33:12 | INFO | auto number: start_number=1 page_next=3 → use 3
+2026-08-10 20:33:12 | INFO | ==== (1/1) GerthaHepfner726296@outlook.com → grok free 003 ====
+2026-08-10 20:33:13 | INFO | [sub2api] open Create Account modal
+2026-08-10 20:33:15 | INFO | [sub2api] step1 name=grok free 003 group=grok free 1x platform=Grok type=OAuth
+2026-08-10 20:33:16 | INFO | [sub2api] click Next
+2026-08-10 20:33:17 | INFO | [sub2api] choose Manual Authorization
+2026-08-10 20:33:18 | INFO | [sub2api] Generate Auth URL
+2026-08-10 20:33:18 | INFO | [sub2api] auth_url=https://auth.x.ai/oauth2/authorize?client_id=b1a00492-073a-47ea-816f-4c329264a828&code_challenge=CVaAM1HcfgRzWVsznOghvHX...
+2026-08-10 20:33:18 | INFO | [oauth] open auth url for GerthaHepfner726296@outlook.com
+2026-08-10 20:33:26 | INFO | [oauth] url=https://accounts.x.ai/sign-in?redirect=oauth2-provider&return_to=%2Foauth2%2Fconsent%3Fresponse_type%3Dcode%26client_id%3Db1a00492-073a-47ea-816f-4c329264a828%2
+2026-08-10 20:33:26 | INFO | [oauth] email filled
+2026-08-10 20:33:27 | INFO | [oauth] password filled
+2026-08-10 20:33:30 | INFO | [oauth] url=https://accounts.google.com/v3/signin/identifier?opparams=%253F&dsh=S-417322242%3A1786368808460877&client_id=455662147616-fai32tqkrc0mqkouoe6l0suk287lkb1k.apps.

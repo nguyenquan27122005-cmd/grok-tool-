@@ -1,0 +1,15 @@
+{
+  "email_provider": "hotmail",
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Zai@2026!Safe",
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "protocol",
+  "proxy": "",
+  "google_sheets": {
+    "enabled": true,
+    "tab": "zai"
+  },
+  "solver_url": "http://127.0.0.1:5073"
+}

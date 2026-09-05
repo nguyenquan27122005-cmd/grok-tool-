@@ -1,0 +1,16 @@
+config.json
+data/**
+!data/README.md
+chrome_runs/
+chrome_profile*/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.log
+STOP
+venv/
+.venv/
+last_*.json
+last_*.png
+network_capture*.json
+_upstream_farm/

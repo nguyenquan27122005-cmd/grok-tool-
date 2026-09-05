@@ -1,0 +1,56 @@
+{
+  "email_provider": "hotmail",
+  "hotmail_list": "data/hotmails.txt",
+  "hotmail_max_aliases": 5,
+  "fixed_password": "Canva@2026!Safe",
+  "password_length": 16,
+  "display_name": "",
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "inter_success_delay_min": 8,
+  "inter_success_delay_max": 20,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "auto",
+  "signup_url": "https://www.canva.com/signup/",
+  "headless": false,
+  "chrome_user_data_dir": "chrome_profile",
+  "chrome_debug_port": 9544,
+  "chrome_window_mode": "offscreen",
+  "chrome_window_position": "-2400,40",
+  "fresh_profile_per_account": true,
+  "proxy": "",
+  "sheet_all_success": true,
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "tmail_wibu": {
+    "base_url": "https://tmail.wibucrypto.pro",
+    "verify_ssl": true,
+    "create_mode": "create",
+    "poll_interval": 2,
+    "domains": [
+      "aban.edu.vn",
+      "kaneapp.top",
+      "wibucrypto.pro"
+    ]
+  },
+  "temp_mail_order": ["azpopmail", "tmail_wibu"],
+  "mail_api": {
+    "enabled": true,
+    "client_id": "",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "google_sheets": {
+    "enabled": true,
+    "tab": "canva"
+  },
+  "redeem": {
+    "url": "https://www.canva.com/redeem/",
+    "retries": 2,
+    "threads": 3
+  }
+}

@@ -1,0 +1,1 @@
+"""Genspark.ai registration package."""

@@ -1,0 +1,10 @@
+config.json
+data/**
+!data/README.md
+chrome_profile*/
+chrome_runs*/
+__pycache__/
+*.pyc
+*.log
+STOP
+venv/

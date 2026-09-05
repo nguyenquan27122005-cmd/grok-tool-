@@ -1,0 +1,14 @@
+config.json
+venv/
+__pycache__/
+*.pyc
+.chrome_profile/
+chrome_profile/
+data/accounts.txt
+data/STOP
+data/*.log
+data/network_capture*.json
+data/hotmails.txt
+data/hotmails_used.txt
+*.png
+*.jpg

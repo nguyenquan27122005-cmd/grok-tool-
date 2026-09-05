@@ -1,0 +1,52 @@
+{
+  "email_provider": "auto_temp",
+  "temp_mail_order": [
+    "azpopmail",
+    "tmail_wibu"
+  ],
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Scispace@2026!Safe",
+  "password_length": 16,
+  "timeout_otp": 180,
+  "batch_count": 1,
+  "inter_success_delay_min": 2,
+  "inter_success_delay_max": 5,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "protocol",
+  "headless": false,
+  "proxy": "",
+  "turnstile": {
+    "solver_url": "http://127.0.0.1:5072",
+    "yescaptcha_key": "",
+    "timeout_sec": 60
+  },
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "tmail_wibu": {
+    "base_url": "https://tmail.wibucrypto.pro",
+    "verify_ssl": true,
+    "create_mode": "create",
+    "poll_interval": 2
+  },
+  "mail_api": {
+    "enabled": true,
+    "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "custom_read_mailbox": "auto",
+  "threads": 1,
+  "retry_transient": 1,
+  "web_port": 8798,
+  "google_sheets": {
+    "enabled": false,
+    "webapp_url": "https://script.google.com/macros/s/AKfycbyHK5cAHyqIg0iTWIqpgmD-0Nrf32t2rk4koSoTpcYP0fxr_w0As030wM2QjRZyiwQK/exec",
+    "spreadsheet_id": "1SeghtwP7_AgwPyH8fSXiUWsW6zbf8R0_HmkfEHtf_GI",
+    "webapp_secret": "grok-overnight-export",
+    "tab": "openart"
+  }
+}

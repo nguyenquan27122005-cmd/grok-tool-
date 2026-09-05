@@ -1,0 +1,37 @@
+{
+  "email_provider": "azpopmail",
+  "hotmail_list": "data/hotmails.txt",
+  "fixed_password": "Capcut@2026!Safe",
+  "password_length": 16,
+  "timeout_otp": 120,
+  "batch_count": 1,
+  "inter_success_delay_min": 8,
+  "inter_success_delay_max": 20,
+  "save_file": "data/accounts.txt",
+  "reg_backend": "protocol",
+  "app_id": "348188",
+  "api_base": "https://www.capcut.com",
+  "otp_type": "34",
+  "proxy": "",
+  "claim_offer": true,
+  "invite_code": "",
+  "share_uid": "",
+  "azpopmail": {
+    "base_url": "https://azpopmail.com",
+    "token": "",
+    "verify_ssl": false,
+    "poll_interval": 2
+  },
+  "mail_api": {
+    "enabled": true,
+    "client_id": "",
+    "poll_interval": 3,
+    "timeout": 180
+  },
+  "google_sheets": {
+    "enabled": true,
+    "tab": "capcut"
+  },
+  "region_secret": "",
+  "_comment_region_secret": "dat khoa vao config.json hoac env CAPCUT_REGION_SECRET"
+}
