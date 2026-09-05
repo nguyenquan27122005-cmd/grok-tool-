@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import time
 import uuid
@@ -246,6 +246,9 @@ class TurnstileAPIServer:
             if self.debug:
                 logger.info(f"Browser {i + 1} initialized successfully with {config['browser_name']} {config['browser_version']}")
 
+        if self.browser_pool.qsize() == 0:
+            logger.error("Browser pool EMPTY — mọi browser launch đều thất bại")
+            raise RuntimeError("Browser pool empty — kiểm tra log launch phía trên")
         logger.info(f"Browser pool initialized with {self.browser_pool.qsize()} browsers")
 
         if self.use_random_config:
@@ -909,6 +912,16 @@ class TurnstileAPIServer:
                 "errorDescription": "Both 'url' and 'sitekey' are required"
             }), 200
 
+        # Quá tải: hết browser rảnh + đang xử lý quá cap → fail fast thay vì
+        # nhồi task chờ browser_pool.get() vô hạn
+        in_flight = len(getattr(self, "_active_tasks", set()))
+        if self.browser_pool.qsize() == 0 and in_flight >= 8:
+            return jsonify({
+                "errorId": 1,
+                "errorCode": "ERROR_CAPTCHA_SOLVER_BUSY",
+                "errorDescription": f"Solver busy: {in_flight} tasks in flight, 0 idle browser"
+            }), 200
+
         task_id = str(uuid.uuid4())
         await save_result(task_id, "turnstile", {
             "status": "CAPTCHA_NOT_READY",
@@ -921,7 +934,7 @@ class TurnstileAPIServer:
         })
 
         try:
-            asyncio.create_task(self._solve_turnstile(
+            task = asyncio.create_task(self._solve_turnstile(
                 task_id=task_id,
                 url=url,
                 sitekey=sitekey,
@@ -929,6 +942,12 @@ class TurnstileAPIServer:
                 cdata=cdata,
                 proxy=proxy,
             ))
+            # giữ strong reference — task không còn ai giữ sẽ bị GC
+            active = getattr(self, "_active_tasks", None)
+            if active is None:
+                active = self._active_tasks = set()
+            active.add(task)
+            task.add_done_callback(active.discard)
 
             if self.debug:
                 logger.debug(f"Request completed with taskid {task_id}.")
@@ -1059,7 +1078,7 @@ def parse_args():
     parser.add_argument('--random', action='store_true', help='Use random User-Agent and Sec-CH-UA configuration from pool')
     parser.add_argument('--browser', type=str, help='Specify browser name to use (e.g., chrome, firefox)')
     parser.add_argument('--version', type=str, help='Specify browser version to use (e.g., 139, 141)')
-    parser.add_argument('--host', type=str, default='0.0.0.0', help='Specify the IP address where the API solver runs. (Default: 127.0.0.1)')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='Specify the IP address where the API solver runs. (Default: 127.0.0.1)')  # audit fix: bind LAN-wide trước đây
     parser.add_argument('--port', type=str, default='5072', help='Set the port for the API solver to listen on. (Default: 5072)')
     return parser.parse_args()
 

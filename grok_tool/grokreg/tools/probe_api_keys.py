@@ -14,7 +14,7 @@ from pathlib import Path
 
 def _load_sub2() -> tuple[str, str, str]:
     """Credentials from local config.json only (never hardcode secrets)."""
-    cfg_path = Path(__file__).resolve().parent / "config.json"
+    cfg_path = Path(__file__).resolve().parents[2] / "config.json"
     base, email, password = "http://localhost:8080", "", ""
     if cfg_path.exists():
         try:

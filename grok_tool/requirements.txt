@@ -6,7 +6,6 @@ colorama
 
 gspread
 google-auth
-requests
 
 # Web control plane
 fastapi

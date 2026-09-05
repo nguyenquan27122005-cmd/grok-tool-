@@ -18,6 +18,9 @@ from .gpt import GptToolPlugin
 from .dreamina import DreaminaToolPlugin
 from .chatgpt import ChatgptToolPlugin
 from .genspark import GensparkToolPlugin
+from .openart import OpenartToolPlugin
+from .scispace import ScispaceToolPlugin
+from .xpilot import XpilotToolPlugin
 
 
 _BRAND_COLORS = {
@@ -61,6 +64,9 @@ def all_plugins() -> Dict[str, BaseToolPlugin]:
         DreaminaToolPlugin(),
         ChatgptToolPlugin(),
         GensparkToolPlugin(),
+        OpenartToolPlugin(),
+        ScispaceToolPlugin(),
+        XpilotToolPlugin(),
         # Icon: drop official mark at static/img/brands/{id}.svg — see brands/README.md
     ]
     return {p.meta.id: p for p in plugins}

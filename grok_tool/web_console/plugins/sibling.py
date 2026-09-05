@@ -54,11 +54,69 @@ class SiblingToolPlugin(BaseToolPlugin):
     # ── resume/checkpoint ──
     supports_resume: bool = True
 
+    # ── checkout link (khai báo để bật chế độ 'Lấy link thanh toán') ──
+    # Engine sibling phải có subcommand `main.py checkout --plans X --interval Y
+    # --accounts data/accounts.txt --out data/checkout_links.txt [--gsheet]`.
+    checkout_plan_options: Tuple[Tuple[str, str, str], ...] = ()  # (value, label, hint) — đủ cả option "Cả N gói"
+    checkout_plan_default: str = ""                              # value mặc định của checkout_plans
+    checkout_intervals: Tuple[str, str] = ("month", "year")      # (mặc định, còn lại) — giá trị CLI engine hiểu
+    checkout_interval_options: Optional[Tuple[Tuple[str, str, str], ...]] = None  # None = sinh từ checkout_intervals
+
+    _INTERVAL_LABELS = {"month": "Monthly", "monthly": "Monthly", "year": "Yearly", "yearly": "Yearly"}
+
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         meta = getattr(cls, "meta", None)
         if meta is None:
             return
+        if cls.checkout_plan_options:
+            if not any(f.key == "job" for f in (meta.fields or [])):
+                meta.fields.insert(
+                    0,
+                    ToolField(
+                        key="job",
+                        label="Chế độ",
+                        type="select",
+                        default="reg",
+                        options=[
+                            FieldOption("reg", "Đăng ký acc", "tạo acc mới"),
+                            FieldOption("checkout", "Lấy link thanh toán", "login từng acc trong ledger → link Stripe từng gói"),
+                        ],
+                    ),
+                )
+            if not any(f.key == "checkout_plans" for f in (meta.fields or [])):
+                meta.fields.append(
+                    ToolField(
+                        key="checkout_plans",
+                        label="Gói cần link",
+                        type="select",
+                        default=cls.checkout_plan_default,
+                        options=[FieldOption(v, l, h) for v, l, h in cls.checkout_plan_options],
+                        hint="Chỉ dùng ở chế độ 'Lấy link thanh toán' — link Stripe sống ~24h, ghi vào data/checkout_links.txt",
+                    )
+                )
+            if not any(f.key == "checkout_interval" for f in (meta.fields or [])):
+                opts = cls.checkout_interval_options or cls._gen_interval_options()
+                meta.fields.append(
+                    ToolField(
+                        key="checkout_interval",
+                        label="Chu kỳ",
+                        type="select",
+                        default=cls.checkout_intervals[0],
+                        options=[FieldOption(v, l, h) for v, l, h in opts],
+                        hint="Chỉ dùng ở chế độ 'Lấy link thanh toán' — mặc định gói tháng",
+                    )
+                )
+            if not any(f.key == "push_gsheet" for f in (meta.fields or [])):
+                meta.fields.append(
+                    ToolField(
+                        key="push_gsheet",
+                        label="Đẩy link vào Google Sheet",
+                        type="checkbox",
+                        default=True,
+                        hint="Bật: sau khi tạo, link được đẩy lên tab <tool>_checkout của Google Sheet (cần Apps Script bản mới có action append_checkout)",
+                    )
+                )
         if cls.supports_resume and not any(f.key == "resume" for f in (meta.fields or [])):
             meta.fields.append(
                 ToolField(
@@ -109,6 +167,18 @@ class SiblingToolPlugin(BaseToolPlugin):
     def sibling_root(self, root: Path) -> Path:
         return root.parent / self.sibling_dir
 
+    @classmethod
+    def _gen_interval_options(cls) -> Tuple[Tuple[str, str, str], ...]:
+        d, o = cls.checkout_intervals
+        lab = cls._INTERVAL_LABELS
+        return (
+            (d, f"{lab.get(d, d)} (mặc định)", "trả theo tháng — luôn dùng trừ khi bạn đổi"),
+            (o, lab.get(o, o), "chỉ khi bạn chủ động chọn"),
+        )
+
+    def _in_checkout(self, params: dict[str, Any]) -> bool:
+        return bool(self.checkout_plan_options) and str(params.get("job") or "reg") == "checkout"
+
     def proxy_config_path(self, root: Path) -> Path | None:
         # 8 tool sibling đều đọc key "proxy" trong config.json của mình
         return self.sibling_root(root) / "config.json"
@@ -125,6 +195,12 @@ class SiblingToolPlugin(BaseToolPlugin):
     # ── lifecycle ──
 
     def preflight(self, params: dict[str, Any], root: Path) -> None:
+        if self._in_checkout(params):
+            # checkout login từ ledger — không cần pool Hotmail
+            d = self.sibling_root(root)
+            if not (d / "main.py").exists():
+                raise RuntimeError(f"Thiếu tool {self.meta.name}: {d}")
+            return
         d = self.sibling_root(root)
         if not (d / "main.py").exists():
             raise RuntimeError(f"Thiếu tool {self.meta.name}: {d}")
@@ -153,15 +229,48 @@ class SiblingToolPlugin(BaseToolPlugin):
             raw = json.loads(cfg_path.read_text(encoding="utf-8"))
             if str(raw.get("custom_read_mailbox") or "") != mb:
                 raw["custom_read_mailbox"] = mb
-                cfg_path.write_text(
+                tmp = cfg_path.with_suffix(".tmp")
+                tmp.write_text(
                     json.dumps(raw, indent=1, ensure_ascii=False) + "\n",
                     encoding="utf-8",
                 )
+                tmp.replace(cfg_path)  # atomic — tránh corrupt config
                 logger.info("custom_read_mailbox=%s ghi vào %s", mb, cfg_path)
         except Exception as e:
             logger.warning("custom_read_mailbox write fail: %s", e)
 
+    def _checkout_command(self, params: dict[str, Any], root: Path) -> list[str]:
+        py = self._py(root)
+        if not py.exists():
+            raise RuntimeError(f"Python venv not found: {py}")
+        plans = str(params.get("checkout_plans") or self.checkout_plan_default).strip()
+        if not plans:
+            plans = self.checkout_plan_default or self.checkout_plan_options[0][0]
+        # mặc định gói THÁNG trừ khi user chủ động chọn yearly
+        interval = str(params.get("checkout_interval") or self.checkout_intervals[0]).strip()
+        if interval not in self.checkout_intervals:
+            interval = self.checkout_intervals[0]
+        cmd = [
+            str(py),
+            "-u",
+            "main.py",
+            "checkout",
+            "--plans",
+            plans,
+            "--interval",
+            interval,
+            "--accounts",
+            "data/accounts.txt",
+            "--out",
+            "data/checkout_links.txt",
+        ]
+        if params.get("push_gsheet") not in (False, "0", "false", "no", "off"):
+            cmd.append("--gsheet")
+        return cmd
+
     def build_command(self, params: dict[str, Any], root: Path) -> list[str]:
+        if self._in_checkout(params):
+            return self._checkout_command(params, root)
         py = self._py(root)
         if not py.exists():
             raise RuntimeError(f"Python venv not found: {py}")
@@ -233,13 +342,22 @@ class SiblingToolPlugin(BaseToolPlugin):
         except Exception:
             pass
 
-    # ── hotmail pool (chung với Grok) ──
+    # ── hotmail pool (RIÊNG theo tool — engine đọc cùng file qua config hotmail_list) ──
+
+    def hotmail_list_path(self, root: Path) -> Path:
+        return self.sibling_root(root) / "data" / "hotmails.txt"
 
     def hotmail_pool(self, root: Path) -> dict[str, Any]:
-        return GrokToolPlugin().hotmail_pool(root)
+        pool = GrokToolPlugin().hotmail_pool(root, path=self.hotmail_list_path(root))
+        pool["path"] = f"{self.sibling_dir}/data/hotmails.txt"
+        return pool
 
     def import_hotmails(self, root: Path, text: str, mode: str = "append") -> dict[str, Any]:
-        return GrokToolPlugin().import_hotmails(root, text, mode)
+        pool = GrokToolPlugin().import_hotmails(
+            root, text, mode, path=self.hotmail_list_path(root)
+        )
+        pool["path"] = f"{self.sibling_dir}/data/hotmails.txt"
+        return pool
 
     # ── ledger ──
 

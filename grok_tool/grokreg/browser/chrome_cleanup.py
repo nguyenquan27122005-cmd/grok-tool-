@@ -26,14 +26,13 @@ log = logging.getLogger("grok-reg")
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Paths that identify OUR automation Chrome (case-insensitive match on cmdline)
+# Paths that identify OUR automation Chrome (case-insensitive match on cmdline).
+# Marker so với cmdline đã thay "/" → "\" và lowercase — chỉ dùng dạng raw
+# single-backslash, dạng `\\` hoặc `/` không bao giờ khớp (dead markers cũ).
 _TOOL_PATH_MARKERS = (
     r"chrome_runs",
-    r"grok_tool\\chrome",
-    r"grok_tool/chrome",
-    r"grok_tool\\grok_tool\\chrome",
-    r"d:\\grok_tool\\grok_tool\\chrome",
-    r"d:/grok_tool/grok_tool/chrome",
+    r"grok_tool\chrome",
+    r"grok_tool\grok_tool\chrome",
 )
 
 # remote-debugging alone is NOT enough (could be another tool) — require tool path

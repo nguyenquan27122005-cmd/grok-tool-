@@ -87,6 +87,14 @@ def parse_provider_choice(raw: str | None) -> Optional[str]:
         return "tmail_wibu"
     if s in ("4", "mailtm", "mail.tm", "m"):
         return "mailtm"
+    if s in (
+        "6",
+        "tmail_spectxte",
+        "tmailspectxte",
+        "spectxte",
+        "spectxte.bond",
+    ):
+        return "tmail_spectxte"
     if s in ("5", "custom_domain", "customdomain", "domain", "rieng", "custom"):
         return "custom_domain"
     return None
@@ -112,23 +120,25 @@ def pick_email_provider(cli_choice: str | None = None) -> str:
     print("=" * 52)
     print("  GROK REGISTER — chọn email")
     print("=" * 52)
-    print("  0) Temp smart  (azpop ↔ wibu, tự đổi khi lag)  [khuyên dùng]")
+    print("  0) Temp smart  (azpop ↔ wibu ↔ spectxte, tự đổi khi lag)  [khuyên dùng]")
     print("  1) Hotmail     (hotmails.txt)")
     print("  2) Temp only   azpopmail.com")
     print("  3) Temp only   tmail.wibucrypto.pro")
+    print("  6) Temp only   tmail.spectxte.bond (API key riêng)")
     print("  5) Domain riêng (random@domain — forward về Hotmail pool)")
     print("=" * 52)
     labels = {
-        "auto_temp": "Temp smart (azpop↔wibu failover)",
+        "auto_temp": "Temp smart (azpop↔wibu↔spectxte failover)",
         "hotmail": "Hotmail",
         "azpopmail": "Temp only azpopmail.com",
         "tmail_wibu": "Temp only tmail.wibucrypto.pro",
+        "tmail_spectxte": "Temp only tmail.spectxte.bond",
         "mailtm": "Mail.tm",
         "custom_domain": "Domain riêng (forward về Hotmail pool)",
     }
     while True:
         try:
-            ans = input("Chọn [0/1/2/3] (Enter=0): ").strip() or "0"
+            ans = input("Chọn [0/1/2/3/6/5] (Enter=0): ").strip() or "0"
         except (EOFError, KeyboardInterrupt):
             print()
             raise SystemExit("Đã hủy.")
@@ -136,28 +146,28 @@ def pick_email_provider(cli_choice: str | None = None) -> str:
         if chosen in labels:
             print(f"→ Dùng {labels[chosen]}\n")
             return chosen
-        print("  Chỉ nhập 0, 1, 2, 3 hoặc 5.")
+        print("  Chỉ nhập 0, 1, 2, 3, 6 hoặc 5.")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Grok register: 0=auto_temp failover | 1=Hotmail | "
-            "2=azpopmail | 3=tmail.wibucrypto.pro"
+            "2=azpopmail | 3=tmail.wibucrypto.pro | 6=tmail.spectxte.bond"
         ),
     )
     p.add_argument(
         "choice",
         nargs="?",
         default=None,
-        help="0 auto_temp | 1 hotmail | 2 azpop | 3 wibu",
+        help="0 auto_temp | 1 hotmail | 2 azpop | 3 wibu | 6 spectxte",
     )
     p.add_argument(
         "--provider",
         "-p",
         dest="provider",
         default=None,
-        help="hotmail | auto_temp | azpopmail | tmail_wibu | mailtm",
+        help="hotmail | auto_temp | azpopmail | tmail_wibu | tmail_spectxte | mailtm",
     )
     p.add_argument(
         "--count",
@@ -232,7 +242,13 @@ async def main(argv: list[str] | None = None) -> None:  # noqa: C901
 
     # Optional per-worker overrides (stress_test.py / multi-instance)
     if os.environ.get("GROK_CHROME_PORT", "").strip():
-        config["chrome_debug_port"] = int(os.environ["GROK_CHROME_PORT"])
+        try:
+            config["chrome_debug_port"] = int(os.environ["GROK_CHROME_PORT"])
+        except ValueError:
+            log.warning(
+                "GROK_CHROME_PORT=%r không phải số — bỏ qua, dùng config",
+                os.environ["GROK_CHROME_PORT"],
+            )
     if os.environ.get("GROK_CHROME_PROFILE", "").strip():
         config["chrome_user_data_dir"] = os.environ["GROK_CHROME_PROFILE"]
         config["fresh_profile_per_account"] = False

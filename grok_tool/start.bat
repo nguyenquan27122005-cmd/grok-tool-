@@ -14,9 +14,10 @@ call venv\Scripts\activate.bat
 echo [*] Installing dependencies...
 pip install -r requirements.txt -q
 
-if not exist hotmails.txt (
-    type nul > hotmails.txt
-    echo [*] Created empty hotmails.txt
+if not exist data mkdir data
+if not exist data\hotmails.txt (
+    type nul > data\hotmails.txt
+    echo [*] Created empty data\hotmails.txt
 )
 
 echo [*] Starting...

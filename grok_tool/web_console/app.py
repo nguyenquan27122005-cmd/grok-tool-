@@ -1,4 +1,4 @@
-"""
+﻿"""
 Web control plane — multi-tool registration console.
 Run:  python -m web_console.app
    or CHAY_WEB.bat
@@ -67,6 +67,42 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Draco Reg — Control Plane", version=__version__, lifespan=lifespan)
+
+# ── Audit fix 2026-09: CSRF + DNS-rebinding cho control plane localhost ──────
+# Console không auth (thiết kế local-only) nên 2 vector cần chặn:
+#  1) Trang web độc trong browser POST cross-origin tới 127.0.0.1:8787
+#     (start/stop job, đổi proxy, import hotmail...) → chặn bằng Origin check.
+#  2) DNS rebinding (attacker.com trỏ về 127.0.0.1 đọc GET responses)
+#     → chặn bằng Host check (TrustedHostMiddleware).
+from fastapi import Request as _FastAPIRequest
+from fastapi.responses import JSONResponse as _JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+# Origin allowlist phải theo đúng port console đang chạy (WEB_PORT), không
+# hardcode 8787 — chạy port khác thì mọi POST từ UI đều bị chặn 403.
+_WEB_PORT = str(os.environ.get("WEB_PORT") or "8787")
+_CSRF_ALLOWED_ORIGINS = {
+    f"http://127.0.0.1:{_WEB_PORT}",
+    f"http://localhost:{_WEB_PORT}",
+}
+
+
+@app.middleware("http")
+async def _csrf_origin_guard(request: _FastAPIRequest, call_next):
+    unsafe = request.method not in ("GET", "HEAD", "OPTIONS")
+    api_path = request.url.path.startswith("/api/")
+    if unsafe and api_path:
+        origin = (request.headers.get("origin") or "").strip().rstrip("/")
+        # Browser luôn gửi Origin trên POST fetch; curl/script nội bộ không
+        # gửi → chấp nhận (máy chủ local, bot/server không qua trình duyệt).
+        if origin and origin not in _CSRF_ALLOWED_ORIGINS:
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Cross-origin request blocked"},
+            )
+    return await call_next(request)
 
 
 def _max_concurrent_from_env() -> int:
@@ -144,7 +180,7 @@ class SolverActionBody(BaseModel):
     action: str = "restart"  # start | stop | restart
 
 
-BRAND_ICON_V = "1.51"
+BRAND_ICON_V = "1.53"
 
 
 def resolve_brand_icon(tool_id: str, explicit: str = "") -> str:

@@ -63,16 +63,21 @@ def random_string(length: int = 12, charset: str | None = None) -> str:
 def random_password(length: int = 14) -> str:
     """Strong random password (used only when config.fixed_password is empty)."""
     length = max(12, int(length or 14))
+    # secrets/SystemRandom — material xác thực không dùng MT random
+    import secrets as _secrets
+
+    sysrandom = _secrets.SystemRandom()
     # Ensure mix of upper/lower/digit/symbol (xAI strength rules)
-    upper = random.choice(string.ascii_uppercase)
-    lower = random.choice(string.ascii_lowercase)
-    digit = random.choice(string.digits)
-    sym = random.choice("!@#$%*")
+    upper = sysrandom.choice(string.ascii_uppercase)
+    lower = sysrandom.choice(string.ascii_lowercase)
+    digit = sysrandom.choice(string.digits)
+    sym = sysrandom.choice("!@#$%*")
     rest = "".join(
-        random.choices(string.ascii_letters + string.digits + "!@#$%*", k=length - 4)
+        sysrandom.choice(string.ascii_letters + string.digits + "!@#$%*")
+        for _ in range(length - 4)
     )
     chars = list(upper + lower + digit + sym + rest)
-    random.shuffle(chars)
+    sysrandom.shuffle(chars)
     return "".join(chars)
 
 
@@ -205,7 +210,7 @@ def save_account(path: Path, email: str, password: str, status: str) -> None:
     # Failover learning: OTP lag on azpop → next run prefers wibu (and reverse)
     try:
         prov = (_CURRENT_EMAIL_PROVIDER or "").lower()
-        if prov in ("azpopmail", "tmail_wibu"):
+        if prov in ("azpopmail", "tmail_wibu", "tmail_spectxte"):
             tmr.note_from_status(prov, status)
     except Exception:
         pass

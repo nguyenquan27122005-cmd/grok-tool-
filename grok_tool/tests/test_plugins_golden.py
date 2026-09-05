@@ -104,6 +104,20 @@ GOLDEN: dict[str, list[tuple[dict, list[str]]]] = {
         ({"mail": "5", "count": 1, "backend": "browser", "custom_domain": "nguyenquan.dpdns.org"},
          ["5", "--count", "1", "--backend", "browser", "--custom-domain", "nguyenquan.dpdns.org"]),
     ],
+    "xpilot": [
+        ({"mail": "0", "count": 2, "backend": "protocol"}, ["0", "--count", "2", "--backend", "protocol"]),
+        # backend lạ vẫn ép protocol (HTTP thuần)
+        ({"mail": "1", "count": 1, "backend": "browser"}, ["1", "--count", "1", "--backend", "protocol"]),
+        ({"mail": "1", "count": 1, "threads": "5"}, ["1", "--count", "1", "--backend", "protocol", "--threads", "5"]),
+        # mail lạ → default "0" (temp)
+        ({"mail": "weird", "count": 1}, ["0", "--count", "1", "--backend", "protocol"]),
+        ({"job": "checkout", "checkout_plans": "creator,pro,ultra", "checkout_interval": "monthly", "push_gsheet": True},
+         ["checkout", "--plans", "creator,pro,ultra", "--interval", "monthly",
+          "--accounts", "data/accounts.txt", "--out", "data/checkout_links.txt", "--gsheet"]),
+        ({"job": "checkout", "checkout_plans": "creator", "checkout_interval": "yearly", "push_gsheet": False},
+         ["checkout", "--plans", "creator", "--interval", "yearly",
+          "--accounts", "data/accounts.txt", "--out", "data/checkout_links.txt"]),
+    ],
 }
 
 EXPECTED_CWD = {
@@ -119,6 +133,7 @@ EXPECTED_CWD = {
     "canva": "canva",
     "chatgpt": "chatgpt",
     "genspark": "genspark",
+    "xpilot": "Xpilot",
 }
 
 EXPECTED_ENV = [
@@ -198,10 +213,13 @@ class GoldenCommandTest(unittest.TestCase):
         )
         self.assertEqual(
             sig["notion"],
+            # audit fix 2026-09: bỏ option mail=5 (Domain riêng) — Notion không
+            # có pool Hotmail (hotmail_pool trả rỗng cố ý), preflight trước đây
+            # luôn raise cho mail=5 → option chỉ là bẫy UI.
             [("mail", "3"), ("custom_domain", "nguyenquan.dpdns.org"), ("count", "1"),
              ("backend", "browser"), ("partner", ""), ("sheet_all", "False"),
              ("until_success", "True"), ("until_offer", "False"),
-             ("resume", "False"), ("threads", "1"), ("custom_read_mailbox", "auto")],
+             ("resume", "False"), ("threads", "1")],
         )
         self.assertEqual(
             sig["manus"],

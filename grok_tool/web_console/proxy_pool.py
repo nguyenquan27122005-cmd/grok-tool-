@@ -59,11 +59,19 @@ def _load() -> dict[str, Any]:
     try:
         data = json.loads(STORE_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
+            proxies: list[str] = []
+            for raw in data.get("proxies") or []:
+                try:
+                    norm = _normalize_one(str(raw))
+                except Exception:  # noqa: BLE001 — dòng hỏng cũ thì bỏ, khỏi vỡ pool
+                    continue
+                if norm:
+                    proxies.append(norm)
             return {
                 "enabled": bool(data.get("enabled", False)),
                 "mode": str(data.get("mode") or "rotate"),
-                "proxies": [str(p) for p in (data.get("proxies") or [])],
-                "cursor": int(data.get("cursor") or 0),
+                "proxies": proxies,
+                "cursor": int(data.get("cursor") or 0) % max(1, len(proxies)) if proxies else 0,
             }
     except Exception:  # noqa: BLE001 — file thiếu/hỏng = state mặc định
         pass
@@ -153,7 +161,11 @@ def normalize_lines(text: str) -> list[str]:
 
 def mask(proxy: str) -> str:
     """Che user:pass khi log — scheme://***@host:port."""
-    p = str(proxy or "")
+    p = str(proxy or "").strip()
+    if not p:
+        return ""
+    if "://" not in p:
+        p = f"http://{p}"  # state cũ thiếu scheme — mask vẫn đúng
     if "@" not in p:
         return p
     scheme, _, rest = p.partition("://")
@@ -218,8 +230,16 @@ def pick() -> tuple[Optional[str], int]:
         return proxies[idx], idx
 
 
-def apply_proxy_to_config(config_path: Path, proxy: str) -> None:
-    """Ghi key 'proxy' vào config.json của tool, giữ nguyên mọi key khác."""
+def apply_proxy_to_config(
+    config_path: Path, proxy: str, pool: Optional[list[str]] = None
+) -> None:
+    """Ghi key 'proxy' vào config.json của tool, giữ nguyên mọi key khác.
+
+    Pool bật (proxy != ""): ghi kèm ``proxy_pool`` (list đầy đủ — engine xoay
+    theo TỪNG acc qua proxy_rotate) + marker ``proxy_source: "pool"``.
+    Pool tắt (proxy == ""): chỉ dọn proxy/pool nếu chính pool đã ghi trước đó
+    (marker) — proxy user tự đi tay trong config KHÔNG bị đụng tới.
+    """
     path = Path(config_path)
     data: dict[str, Any] = {}
     if path.exists():
@@ -229,11 +249,56 @@ def apply_proxy_to_config(config_path: Path, proxy: str) -> None:
                 data = loaded
         except Exception:  # noqa: BLE001 — config hỏng thì ghi đè tối thiểu
             data = {}
-    data["proxy"] = str(proxy)
+    if str(proxy or "").strip():
+        data["proxy"] = str(proxy)
+        if pool:
+            data["proxy_pool"] = [str(p) for p in pool if str(p).strip()]
+        data["proxy_source"] = "pool"
+    elif data.get("proxy_source") == "pool":
+        # pool tắt — chỉ gỡ những gì pool đã ghi
+        data["proxy"] = ""
+        data.pop("proxy_pool", None)
+        data.pop("proxy_source", None)
+    else:
+        return  # không có gì để làm — khỏi ghi file
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
+
+
+def _tcp_ok(proxy: str, timeout: float = 2.5) -> bool:
+    """Health-check mức TCP — bắt proxy chết/trả tiền xong trước khi job burn email."""
+    try:
+        from urllib.parse import urlparse
+
+        host = (urlparse(proxy).hostname or "").strip()
+        port = int(urlparse(proxy).port or 0)
+        if not host or not port:
+            return True  # không parse được → đừng chặn, để engine tự xử lý
+        import socket
+
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def pick_alive(max_tries: int = 3) -> tuple[Optional[str], int, list[str]]:
+    """pick() + health-check TCP. Proxy chết bị bỏ qua (cursor vẫn tiến).
+
+    Trả (proxy, idx, dead_masks) — dead_masks = các proxy đã skip (để log).
+    Pool tắt/rỗng/hết proxy sống → ("", -1, dead).
+    """
+    dead: list[str] = []
+    for _ in range(max(1, max_tries)):
+        proxy, idx = pick()
+        if not proxy:
+            return "", -1, dead
+        if _tcp_ok(proxy):
+            return proxy, idx, dead
+        dead.append(mask(proxy))
+    return "", -1, dead
 
 
 def sync_gpttool() -> str:

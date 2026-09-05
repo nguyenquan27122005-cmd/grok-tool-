@@ -100,6 +100,9 @@ desktop.ini
 .vscode/
 *.code-workspace
 
+# --- CloakBrowser cache (Chromium binary on D:) ---
+.cloakbrowser/
+
 # --- Local overrides ---
 local/
 private/

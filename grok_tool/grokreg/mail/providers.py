@@ -27,6 +27,7 @@ from pydoll.browser.options import ChromiumOptions
 
 import grokreg.browser.anti_flag as af
 from grokreg.mail.tmail_wibu import TmailWibuProvider
+from grokreg.mail.tmail_spectxte import TmailSpectxteProvider
 import grokreg.mail.temp_mail_router as tmr
 import grokreg.browser.chrome_cleanup as chrome_clean
 import grokreg.core.style_log as slog
@@ -408,7 +409,13 @@ class AzpopMailProvider:
                     subject = str(m.get("subject") or "")
                     frm = str(m.get("from") or m.get("sender") or "")
                     # Subject often has "confirmation code: 754-480" — don't wait on body.
-                    otp = extract_otp(subject) or extract_otp(f"{subject} {frm}")
+                    # Catch-all domain: OTP từ subject phải có dấu hiệu xAI, nếu không
+                    # spam 6 số sẽ thắng trước body path (nơi có gate _is_xai_mail).
+                    otp = (
+                        (extract_otp(subject) or extract_otp(f"{subject} {frm}"))
+                        if _is_xai_mail(f"{subject} {frm}")
+                        else None
+                    )
                     if otp:
                         elapsed = time.time() - t0
                         log.info(
@@ -516,10 +523,12 @@ class HotmailProvider:
         ]
 
     def _write_lines(self, lines: list[str]) -> None:
-        self.list_path.write_text(
+        tmp = self.list_path.with_suffix(".tmp")
+        tmp.write_text(
             "\n".join(lines) + ("\n" if lines else ""),
             encoding="utf-8",
         )
+        tmp.replace(self.list_path)  # atomic — pool credential không được mất
 
     def _session_mailbox(self, session: EmailSession) -> str:
         mb = (getattr(session, "mailbox_address", "") or "").strip()
@@ -920,6 +929,7 @@ def wait_otp_smart(
     since_iso: str | None = None,
     azpop: Optional[AzpopMailProvider] = None,
     tmail_wibu: Optional[TmailWibuProvider] = None,
+    tmail_spectxte: Optional[TmailSpectxteProvider] = None,
 ) -> Optional[str]:
     """
     OTP priority:
@@ -927,6 +937,7 @@ def wait_otp_smart(
       custom_domain→ mail_api — forward về Hotmail, cùng cơ chế hotmail
       azpopmail  → https://azpopmail.com/document REST API
       tmail_wibu → https://tmail.wibucrypto.pro Livewire
+      tmail_spectxte → https://tmail.spectxte.bond REST API
       mailtm     → Mail.tm native API
     """
     if session.provider in ("hotmail", "custom_domain"):
@@ -953,6 +964,10 @@ def wait_otp_smart(
 
     if session.provider == "tmail_wibu":
         client = tmail_wibu or TmailWibuProvider()
+        return client.wait_otp(session, timeout=timeout, ignore_ids=ignore_ids)
+
+    if session.provider == "tmail_spectxte":
+        client = tmail_spectxte or TmailSpectxteProvider()
         return client.wait_otp(session, timeout=timeout, ignore_ids=ignore_ids)
 
     return mailtm.wait_otp(session, timeout=timeout)

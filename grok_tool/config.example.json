@@ -1,6 +1,10 @@
 {
   "email_provider": "auto_temp",
-  "temp_mail_order": ["azpopmail", "tmail_wibu"],
+  "temp_mail_order": [
+    "azpopmail",
+    "tmail_wibu",
+    "tmail_spectxte"
+  ],
   "hotmail_list": "data/hotmails.txt",
   "hotmail_max_aliases": 5,
   "proxy": "",
@@ -21,8 +25,8 @@
   "humanize": true,
   "human_delay_min": 2.0,
   "human_delay_max": 5.5,
-  "inter_success_delay_min": 45,
-  "inter_success_delay_max": 90,
+  "inter_success_delay_min": 2,
+  "inter_success_delay_max": 5,
   "mail_fail_cooldown_min": 120,
   "cf_max_retries": 2,
   "cf_wait_sec": 40,
@@ -105,8 +109,15 @@
         "auth_mode": "graph",
         "max_messages": 20
       },
-      { "name": "ms_graph", "enabled": true },
-      { "name": "mailgen", "enabled": false, "base_url": "" }
+      {
+        "name": "ms_graph",
+        "enabled": true
+      },
+      {
+        "name": "mailgen",
+        "enabled": false,
+        "base_url": ""
+      }
     ]
   },
   "google_sheets": {
@@ -132,6 +143,12 @@
     "yescaptcha_key": "",
     "timeout_sec": 90,
     "sitekey": ""
+  },
+  "tmail_spectxte": {
+    "base_url": "https://tmail.spectxte.bond",
+    "token": "",
+    "verify_ssl": true,
+    "poll_interval": 3,
+    "domains": []
   }
 }
-

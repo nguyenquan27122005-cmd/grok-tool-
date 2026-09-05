@@ -10,7 +10,8 @@
  */
 
 // Set in Apps Script project settings / Script Properties, or edit locally (do not commit real value)
-var SECRET = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET') || 'grok-overnight-export';
+var SECRET = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+if (!SECRET) { throw new Error('WEBAPP_SECRET chua set trong Script Properties — tu choi moi request.'); }
 var DEFAULT_GID = 0;
 var TAB_NAME = 'grok';
 var DEFAULT_PASS = '';

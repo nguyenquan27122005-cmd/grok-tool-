@@ -27,6 +27,7 @@ from pydoll.browser.options import ChromiumOptions
 
 import grokreg.browser.anti_flag as af
 from grokreg.mail.tmail_wibu import TmailWibuProvider
+from grokreg.mail.tmail_spectxte import TmailSpectxteProvider
 import grokreg.mail.temp_mail_router as tmr
 import grokreg.browser.chrome_cleanup as chrome_clean
 import grokreg.core.style_log as slog
@@ -68,6 +69,7 @@ from grokreg.browser.chrome import (  # noqa: F401
 )
 from grokreg.browser.jsutil import _exec_js, _unwrap_js_result  # noqa: F401
 from grokreg.browser.network_castle import *
+from grokreg.browser.network_castle import _NET_REQUESTS, _NET_RESPONSES  # noqa: F401
 from grokreg.browser.page_flow import *
 from grokreg.browser.page_flow import (  # noqa: F401
     _grab_sso_cookie,
@@ -76,10 +78,11 @@ from grokreg.browser.page_flow import (  # noqa: F401
 
 def _normalize_email_provider(name: str) -> str:
     """
-    Return: hotmail | azpopmail | tmail_wibu | auto_temp | mailtm | auto | custom_domain
+    Return: hotmail | azpopmail | tmail_wibu | tmail_spectxte | auto_temp | mailtm | auto | custom_domain
       azpopmail  = https://azpopmail.com/document only
       tmail_wibu = https://tmail.wibucrypto.pro only
-      auto_temp  = pick healthier of azpop/wibu; lag → switch next run
+      tmail_spectxte = https://tmail.spectxte.bond only
+      auto_temp  = pick healthier of azpop/wibu/spectxte; lag → switch next run
       mailtm     = legacy Mail.tm
       auto       = hotmail if pool usable, else auto_temp
       custom_domain = random@<domain riêng> — mail forward về Hotmail, đọc qua Graph
@@ -103,6 +106,15 @@ def _normalize_email_provider(name: str) -> str:
         "tmail",
     ):
         return "tmail_wibu"
+    if n in (
+        "tmail_spectxte",
+        "tmailspectxte",
+        "spectxte",
+        "tmail.spectxte",
+        "tmail.spectxte.bond",
+        "spectxte.bond",
+    ):
+        return "tmail_spectxte"
     if n in ("mailtm", "mail.tm"):
         return "mailtm"
     if n in ("custom_domain", "customdomain", "domain_rieng", "domain", "rieng", "own_domain", "5"):
@@ -116,8 +128,9 @@ def _create_temp_session(
     azpop: AzpopMailProvider,
     tmail_wibu: Optional[TmailWibuProvider],
     config: dict[str, Any],
+    tmail_spectxte: Optional[TmailSpectxteProvider] = None,
 ) -> EmailSession:
-    """Create mailbox on azpop or tmail; on create fail try the other once."""
+    """Create mailbox on azpop/tmail/spectxte; on create fail try the next once."""
     order = [which] + [p for p in tmr.PROVIDERS if p != which]
     last_err: Exception | None = None
     for prov in order:
@@ -125,6 +138,13 @@ def _create_temp_session(
             if prov == "azpopmail":
                 sess = azpop.create()
                 log.info("TempMail using azpopmail → %s", sess.address)
+                return sess
+            if prov == "tmail_spectxte":
+                client = tmail_spectxte or TmailSpectxteProvider(
+                    config.get("tmail_spectxte") or {}
+                )
+                sess = client.create()
+                log.info("TempMail using tmail_spectxte → %s", sess.address)
                 return sess
             client = tmail_wibu or TmailWibuProvider(config.get("tmail_wibu") or {})
             address, extra = client.create_mailbox()
@@ -150,17 +170,20 @@ def _auto_fix_next_temp_email(
     *,
     avoid_provider: str = "",
     avoid_domain: str = "",
+    tmail_spectxte: Optional[TmailSpectxteProvider] = None,
 ) -> EmailSession:
     """
-    AUTO-FIX: pick the other temp provider (or re-pick domain) after email_submit/otp fail.
+    AUTO-FIX: pick the next temp provider (or re-pick domain) after email_submit/otp fail.
     """
     avoid = (avoid_provider or "").lower()
     if avoid in tmr.PROVIDERS:
-        which = "tmail_wibu" if avoid == "azpopmail" else "azpopmail"
+        others = [p for p in tmr.PROVIDERS if p != avoid]
+        which = others[0] if others else "azpopmail"
     else:
         which = tmr.pick_temp_provider(
             preferred_order=list(
-                config.get("temp_mail_order") or ["azpopmail", "tmail_wibu"]
+                config.get("temp_mail_order")
+                or ["azpopmail", "tmail_wibu", "tmail_spectxte"]
             )
         )
     # If avoid domain on azpop, domain ranker already deprioritizes fails
@@ -170,20 +193,24 @@ def _auto_fix_next_temp_email(
         avoid or "-",
         avoid_domain or "-",
     )
-    return _create_temp_session(which, azpop, tmail_wibu, config)
+    return _create_temp_session(
+        which, azpop, tmail_wibu, config, tmail_spectxte=tmail_spectxte
+    )
 
 def acquire_email_session(
     config: dict[str, Any],
     mailtm: MailTmProvider,
     azpop: AzpopMailProvider,
     tmail_wibu: Optional[TmailWibuProvider] = None,
+    tmail_spectxte: Optional[TmailSpectxteProvider] = None,
 ) -> tuple[EmailSession, Optional[HotmailProvider]]:
     """
     Pick email for this run (mode already chosen by user menu/CLI).
       hotmail    → hotmails.txt
       azpopmail  → azpopmail.com only
       tmail_wibu → tmail.wibucrypto.pro only
-      auto_temp  → healthier of azpop/wibu (failover)
+      tmail_spectxte → tmail.spectxte.bond only
+      auto_temp  → healthier of azpop/wibu/spectxte (failover)
       mailtm     → Mail.tm
       auto       → hotmail if pool usable else auto_temp
     """
@@ -211,7 +238,13 @@ def acquire_email_session(
 
     if mode == "tmail_wibu":
         return (
-            _create_temp_session("tmail_wibu", azpop, tmail_wibu, config),
+            _create_temp_session("tmail_wibu", azpop, tmail_wibu, config, tmail_spectxte=tmail_spectxte),
+            _hotmail_handle(),
+        )
+
+    if mode == "tmail_spectxte":
+        return (
+            _create_temp_session("tmail_spectxte", azpop, tmail_wibu, config, tmail_spectxte=tmail_spectxte),
             _hotmail_handle(),
         )
 
@@ -262,10 +295,15 @@ def acquire_email_session(
         which = tmr.pick_temp_provider(
             preferred_order=list(
                 config.get("temp_mail_order")
-                or ["azpopmail", "tmail_wibu"]
+                or ["azpopmail", "tmail_wibu", "tmail_spectxte"]
             )
         )
-        return _create_temp_session(which, azpop, tmail_wibu, config), _hotmail_handle()
+        return (
+            _create_temp_session(
+                which, azpop, tmail_wibu, config, tmail_spectxte=tmail_spectxte
+            ),
+            _hotmail_handle(),
+        )
 
     # ---- auto: hotmail first, else auto_temp ----
     hotmail = HotmailProvider.from_config(list_path, config)
@@ -287,9 +325,17 @@ def acquire_email_session(
             total,
         )
     which = tmr.pick_temp_provider(
-        preferred_order=list(config.get("temp_mail_order") or ["azpopmail", "tmail_wibu"])
+        preferred_order=list(
+            config.get("temp_mail_order")
+            or ["azpopmail", "tmail_wibu", "tmail_spectxte"]
+        )
     )
-    return _create_temp_session(which, azpop, tmail_wibu, config), hotmail
+    return (
+        _create_temp_session(
+            which, azpop, tmail_wibu, config, tmail_spectxte=tmail_spectxte
+        ),
+        hotmail,
+    )
 
 
 async def _extract_session_display(tab: Any) -> tuple[str, str]:
@@ -424,6 +470,16 @@ def _delay_bounds(config: dict, lo: float, hi: float) -> tuple[float, float]:
     return nlo, nhi
 
 async def register_one(config: dict[str, Any]) -> None:
+    # Lanes chạy song song (app.py asyncio.gather) chia sẻ 1 dict config —
+    # mỗi account phải có bản riêng để proxy/SSO cookie không lẫn giữa acc.
+    config = dict(config or {})
+    # Proxy: pool nhiều IP → xoay theo TỪNG acc (dồn 1 IP là bị flag)
+    try:
+        from grokreg.core.proxy_rotate import next_proxy
+
+        config["proxy"] = next_proxy(config)
+    except Exception:
+        pass
     if is_stop_requested():
         log.warning("register_one skipped — stop already requested (%s)", stop_reason())
         return "stopped"
@@ -476,11 +532,15 @@ async def register_one(config: dict[str, Any]) -> None:
     mailtm = MailTmProvider()
     azpop = AzpopMailProvider(config.get("azpopmail") or {})
     tmail_wibu = TmailWibuProvider(config.get("tmail_wibu") or {})
+    tmail_spectxte = TmailSpectxteProvider(config.get("tmail_spectxte") or {})
     email_session, hotmail = acquire_email_session(
-        config, mailtm, azpop, tmail_wibu=tmail_wibu
+        config, mailtm, azpop, tmail_wibu=tmail_wibu, tmail_spectxte=tmail_spectxte
     )
-    global _CURRENT_EMAIL_PROVIDER
-    _CURRENT_EMAIL_PROVIDER = str(email_session.provider or "")
+    # Ghi thẳng vào module helpers — `global` trong flow chỉ đổi bản copy
+    # do star-import tạo ra, còn save_account() đọc global của helpers.
+    import grokreg.core.helpers as _helpers
+
+    _helpers._CURRENT_EMAIL_PROVIDER = str(email_session.provider or "")
 
     grok_password = resolve_password(config)
     # --- styled terminal (display only) ---
@@ -519,7 +579,7 @@ async def register_one(config: dict[str, Any]) -> None:
     full_name = f"{first_name} {last_name}"
 
     log.info("Email     : %s  [%s]", email_session.address, email_session.provider)
-    log.info("Password  : %s", grok_password)
+    log.info("Password  : %s", grok_password[:2] + "***" if grok_password else "")
     log.info("Name      : %s", full_name)
     log.info("mail_api  : %s", "ON" if mail_api.enabled else "OFF")
 
@@ -592,6 +652,7 @@ async def register_one(config: dict[str, Any]) -> None:
                 since_iso=since_iso,
                 azpop=azpop,
                 tmail_wibu=tmail_wibu,
+                tmail_spectxte=tmail_spectxte,
             )
             if not otp:
                 status = "error:otp_timeout_resume"
@@ -841,7 +902,8 @@ async def register_one(config: dict[str, Any]) -> None:
                         )
                         last_page_err = None
                     # Fatal page errors → mail will never arrive (AUTO-FIX retries below)
-                    if (
+                    # (last_page_err có thể vừa bị reset thành None ở nhánh alert trên)
+                    if last_page_err and (
                         last_page_err.startswith("error_generic")
                         or last_page_err.startswith("verification_failed")
                         or last_page_err.startswith("invalid_input_undefined")
@@ -1100,7 +1162,12 @@ async def register_one(config: dict[str, Any]) -> None:
                             "STOP sớm: xAI 'Something went wrong' — đổi VPN rồi Start lại"
                         )
                         return status
-                if email_session.provider in ("azpopmail", "tmail_wibu", "mailtm"):
+                if email_session.provider in (
+                    "azpopmail",
+                    "tmail_wibu",
+                    "tmail_spectxte",
+                    "mailtm",
+                ):
                     try:
                         for attempt in range(1, max_autofix + 1):
                             old = email_session.address
@@ -1122,8 +1189,13 @@ async def register_one(config: dict[str, Any]) -> None:
                                 tmail_wibu,
                                 avoid_provider=old_p if attempt % 2 == 0 else "",
                                 avoid_domain=old.split("@")[-1] if "@" in old else "",
+                                tmail_spectxte=tmail_spectxte,
                             )
-                            _CURRENT_EMAIL_PROVIDER = email_session.provider
+                            import grokreg.core.helpers as _helpers
+
+                            _helpers._CURRENT_EMAIL_PROVIDER = (
+                                email_session.provider
+                            )
                             log.info(
                                 "AUTO-FIX new email after no_otp_page (%s/%s): %s [%s] (was %s)",
                                 attempt,
@@ -1240,6 +1312,7 @@ async def register_one(config: dict[str, Any]) -> None:
                 since_iso=since_iso,
                 azpop=azpop,
                 tmail_wibu=tmail_wibu,
+                tmail_spectxte=tmail_spectxte,
             )
 
             if not otp:

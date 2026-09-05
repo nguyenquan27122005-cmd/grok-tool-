@@ -63,13 +63,19 @@ def load_state(root: Path) -> dict[str, Any]:
         return {}
 
 
+_state_write_lock = threading.Lock()
+
+
 def _save_state(root: Path, state: dict[str, Any]) -> None:
     p = _state_path(root)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(
-            json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8"
-        )
+        with _state_write_lock:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
+            tmp.replace(p)  # atomic — 2 writer không còn corrupt JSON
     except Exception:
         logger.warning("[health] save state failed", exc_info=True)
 
@@ -85,8 +91,10 @@ def _classify(acc: dict[str, Any]) -> tuple[str, int, str]:
     )
     code = 0
     for src in (snap.get("status_code"), snap.get("code")):
+        if src is None:
+            continue  # None phải nhảy sang nguồn kế, không phải code=0
         try:
-            code = int(src or 0)
+            code = int(src)
             break
         except (TypeError, ValueError):
             continue

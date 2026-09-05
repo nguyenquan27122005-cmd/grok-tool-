@@ -9,6 +9,8 @@ set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
 set WEB_PORT=8787
 set WEB_HOST=127.0.0.1
+:: CloakBrowser Chromium cache — giữ trên ổ D, tránh ổ C
+set CLOAKBROWSER_CACHE_DIR=%~dp0\.cloakbrowser
 
 if not exist "venv\Scripts\python.exe" (
     echo [LOI] Chua co venv. Chay start.bat lan dau.

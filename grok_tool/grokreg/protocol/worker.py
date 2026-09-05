@@ -28,6 +28,7 @@ from grokreg.mail.providers import (
     wait_otp_smart,
 )
 from grokreg.mail.tmail_wibu import TmailWibuProvider
+from grokreg.mail.tmail_spectxte import TmailSpectxteProvider
 from grokreg.protocol.backend import (
     ProtocolEnvironmentError,
     ProtocolRegistrationBackend,
@@ -130,6 +131,9 @@ def register_one_protocol(config: dict[str, Any], *, castle: bool = False) -> Pr
     castle=True  — mint Castle via Chrome then HTTP verify/submit.
     """
     t0 = time.time()
+    # Batch nhiều luồng chia sẻ 1 dict config — mỗi account tự chỉnh
+    # (email_provider, proxy, SSO cookie…) nên phải làm việc trên bản copy.
+    config = dict(config or {})
     email_session: Optional[EmailSession] = None
     password = resolve_password(config)
     fixed_f = str(config.get("fixed_first_name") or "").strip()
@@ -177,15 +181,19 @@ def register_one_protocol(config: dict[str, Any], *, castle: bool = False) -> Pr
             params.action_id[:12],
         )
 
-        # Tmail không nhận thư xAI. Protocol dùng Azpop trừ khi user chọn Hotmail.
+        # Tmail không nhận thư xAI. Protocol dùng Azpop trừ khi user chọn
+        # Hotmail hoặc tmail_spectxte (REST API riêng, có thể nhận xAI).
         prov = str(config.get("email_provider") or "").strip().lower()
-        if prov not in ("hotmail", "outlook"):
+        if prov not in ("hotmail", "outlook", "tmail_spectxte"):
             config["email_provider"] = "azpopmail"
 
         mailtm = MailTmProvider()
         azpop = AzpopMailProvider(config.get("azpopmail") or {})
         tmail = TmailWibuProvider(config.get("tmail_wibu") or {})
-        email_session, hotmail = acquire_email_session(config, mailtm, azpop, tmail)
+        tmail_spectxte = TmailSpectxteProvider(config.get("tmail_spectxte") or {})
+        email_session, hotmail = acquire_email_session(
+            config, mailtm, azpop, tmail, tmail_spectxte=tmail_spectxte
+        )
         email = email_session.address
         log.info("[protocol] email=%s provider=%s", email, email_session.provider)
         slog.api_ok(f"HTTP email: {email} ({email_session.provider})")
@@ -193,14 +201,18 @@ def register_one_protocol(config: dict[str, Any], *, castle: bool = False) -> Pr
         castle_token = ""
         otp_raw = ""
         token = ""
-        mail_api = MailApiClient(config)
+        mail_api = MailApiClient(config.get("mail_api") or {})
         timeout_otp = int(config.get("timeout_otp") or 120)
         since_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 30))
 
         if castle:
             email_already_sent = False
             log.info("[protocol] polling OTP + Castle CreateEmail (Chrome)…")
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            # Không dùng `with` — __exit__ luôn shutdown(wait=True) và sẽ chặn
+            # tới khi wait_otp_smart tự hết hạn (thêm timeout_otp+90s) khi OTP
+            # timeout. shutdown(wait=False, cancel_futures=True) không chặn.
+            pool = ThreadPoolExecutor(max_workers=2)
+            try:
                 otp_fut = pool.submit(
                     wait_otp_smart,
                     email_session,
@@ -212,6 +224,7 @@ def register_one_protocol(config: dict[str, Any], *, castle: bool = False) -> Pr
                     since_iso=since_iso,
                     azpop=azpop,
                     tmail_wibu=tmail,
+                    tmail_spectxte=tmail_spectxte,
                 )
                 try:
                     from grokreg.protocol.castle import mint_castle
@@ -240,8 +253,11 @@ def register_one_protocol(config: dict[str, Any], *, castle: bool = False) -> Pr
                     site_key=params.site_key,
                     url=SIGNUP_URL,
                 )
-                otp_raw = otp_fut.result(timeout=max(40, timeout_otp + 20))
-                token = ts_fut.result(timeout=max(30, timeout_otp))
+                # result timeout ≥ budget của future (wait_otp_smart(timeout_otp+90))
+                otp_raw = otp_fut.result(timeout=timeout_otp + 95)
+                token = ts_fut.result(timeout=max(120, timeout_otp + 30))
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
         else:
             log.info("[protocol] send_email_code…")
             slog.api_ok("HTTP CreateEmail (GitHub — 0 Chrome)")
@@ -258,6 +274,7 @@ def register_one_protocol(config: dict[str, Any], *, castle: bool = False) -> Pr
                 since_iso=since_iso,
                 azpop=azpop,
                 tmail_wibu=tmail,
+                tmail_spectxte=tmail_spectxte,
             )
             if otp_raw:
                 log.info("[protocol] solve Turnstile…")

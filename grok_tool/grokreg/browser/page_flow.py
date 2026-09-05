@@ -142,7 +142,7 @@ async def prepare_and_submit_email(
     try:
         ctok = await castle_try_create_token(tab)
         log.info("Castle pre-submit mint: %s", ctok)
-        if not ctok.get("ok"):
+        if not (ctok or {}).get("ok"):
             # dwell + motion, try again once
             await asyncio.sleep(random.uniform(2.0, 4.0))
             await _exec_js(
@@ -191,7 +191,7 @@ async def prepare_and_submit_email(
     clicked = await human_click_continue_after_email(tab, config)
     if not clicked:
         log.warning("Continue after email not found — try Enter key via JS")
-        await _exec_js(
+        result = await _exec_js(
             tab,
             """
             (() => {
@@ -212,7 +212,7 @@ async def prepare_and_submit_email(
             })()
             """,
         )
-        clicked = True
+        clicked = bool(result)  # submit thất bại → caller phải biết, đừng chờ OTP ảo
     return bool(clicked)
 
 
@@ -851,11 +851,15 @@ async def fill_otp_on_page(tab: Any, otp: str) -> bool:
         }})()
         """,
     )
-    log.info("OTP force-set: %s", got)
+    log.info(
+        "OTP force-set: ok=%s len=%s",
+        isinstance(got, dict) and got.get("ok"),
+        len(str((got or {}).get("value") or "")) if isinstance(got, dict) else -1,
+    )
     verified = False
     if isinstance(got, dict) and got.get("ok"):
         verified = True
-        log.info("OTP field OK: %s", got.get("value"))
+        log.info("OTP field OK (len=%s)", len(str(got.get("value") or "")))
     if not verified:
         # one more check
         check = await _exec_js(
@@ -941,9 +945,11 @@ def _load_rate_limits() -> dict[str, Any]:
 
 
 def _save_rate_limits(data: dict[str, Any]) -> None:
-    RATE_LIMIT_PATH.write_text(
+    tmp = RATE_LIMIT_PATH.with_suffix(".tmp")
+    tmp.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    tmp.replace(RATE_LIMIT_PATH)  # atomic — crash giữa write không reset hết cooldown
 
 
 def set_email_rate_limit(email: str, minutes: int = 55, note: str = "") -> None:
@@ -993,82 +999,8 @@ async def find_first(tab: Any, strategies: list[dict[str, Any]], timeout: int = 
     return None
 
 
-def _unwrap_js_result(result: Any) -> Any:
-    """Normalize pydoll/CDP evaluate return values."""
-    if not isinstance(result, dict):
-        return result
-    # CDP shape: {id, result: {result: {type, value}}}
-    try:
-        inner = result
-        for _ in range(6):
-            if not isinstance(inner, dict):
-                break
-            # terminal CDP remote object
-            if "type" in inner and ("value" in inner or inner.get("type") == "undefined"):
-                val = inner.get("value")
-                # auto-parse JSON strings we wrap ourselves
-                if isinstance(val, str):
-                    s = val.strip()
-                    if (s.startswith("{") and s.endswith("}")) or (
-                        s.startswith("[") and s.endswith("]")
-                    ):
-                        try:
-                            return json.loads(s)
-                        except Exception:
-                            pass
-                return val
-            if "result" in inner:
-                inner = inner["result"]
-                continue
-            if "value" in inner and len(inner) <= 3:
-                return inner["value"]
-            break
-        return result
-    except Exception:
-        return result
-
-
-async def _exec_js(tab: Any, script: str) -> Any:
-    """
-    Execute JS and return a Python value.
-    pydoll returns objectId for objects unless return_by_value=True;
-    we also JSON.stringify complex expressions as fallback.
-    """
-    # Prefer scripts that already stringify; otherwise wrap when needed
-    script_stripped = script.strip()
-    candidates = [script_stripped]
-    # If it's an IIFE returning object, also try stringify wrap
-    if script_stripped.startswith("(()") or script_stripped.startswith("(function"):
-        candidates.append(
-            f"(() => {{ const __r = ({script_stripped}); "
-            f"try {{ return JSON.stringify(__r); }} catch (e) {{ return __r; }} }})()"
-        )
-
-    for method_name in ("execute_script", "evaluate"):
-        if not hasattr(tab, method_name):
-            continue
-        fn = getattr(tab, method_name)
-        for sc in candidates:
-            try:
-                try:
-                    raw = await fn(sc, return_by_value=True)
-                except TypeError:
-                    raw = await fn(sc)
-                val = _unwrap_js_result(raw)
-                # skip useless objectId-only remote objects
-                if isinstance(val, dict) and set(val.keys()) <= {
-                    "id",
-                    "result",
-                    "type",
-                    "className",
-                    "description",
-                    "objectId",
-                }:
-                    continue
-                return val
-            except Exception:
-                continue
-    return None
+# _exec_js/_unwrap_js_result: dùng bản import từ jsutil (đầu file) — bản fork
+# cục bộ cũ thiếu await_promise, async IIFE trả về unawaited (đã xoá 2026-09).
 
 
 # Social / OAuth CTAs — never treat these as the email-register Continue button

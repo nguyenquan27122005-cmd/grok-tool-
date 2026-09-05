@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Overnight 1-thread Grok reg (azpopmail). Stop at 06:00.
 Stable: do NOT thrash-kill chrome mid-run; only kill previous main.py between runs.
@@ -21,7 +21,9 @@ LOCK = ROOT / "data" / "overnight.lock"
 try:
     from grokreg.core import winhide
 
-    PY = winhide.hidden_python(ROOT if (ROOT / "venv").is_dir() else ROOT.parent.parent)
+    # Không có venv trong project → dùng interpreter hiện tại thay vì đoán
+    # đường dẫn ngoài (ROOT.parent.parent là ổ đĩa).
+    PY = winhide.hidden_python(ROOT if (ROOT / "venv").is_dir() else ROOT)
 except Exception:
     PY = ROOT / "venv" / "Scripts" / "pythonw.exe"
     if not PY.exists():
@@ -53,8 +55,20 @@ def log(msg: str) -> None:
         pass
 
 
+_RUN_START: datetime | None = None
+
+
 def should_stop() -> bool:
-    return now().hour >= STOP_HOUR
+    # Audit fix: dừng khi `now` vượt mốc 06:00 ĐẦU TIÊN sau khi start —
+    # version cũ so `hour >= 6` nên chạy lúc 22:00 là dừng ngay (22 >= 6).
+    if _RUN_START is None:
+        return now().hour >= STOP_HOUR
+    stop = _RUN_START.replace(hour=STOP_HOUR, minute=0, second=0, microsecond=0)
+    if stop <= _RUN_START:
+        from datetime import timedelta
+
+        stop += timedelta(days=1)
+    return now() >= stop
 
 
 def free_ram_gb() -> float:
@@ -259,6 +273,7 @@ def run_one(run_id: int) -> tuple[str, float]:
                     log(f"TIMEOUT run#{run_id} >{HARD_TIMEOUT}s — kill main only")
                     try:
                         proc.kill()
+                        proc.wait(timeout=10)  # reap — tránh zombie
                     except Exception:
                         pass
                     kill_main_only()
@@ -312,7 +327,10 @@ def main() -> int:
     stats = {"runs": 0, "ok": 0, "fail": 0, "timeout": 0}
     run_id = 0
     last_health = 0.0
+    global _RUN_START
+    _RUN_START = now()
 
+    consecutive_failures = 0  # audit fix: circuit breaker
     while not should_stop():
         if time.time() - last_health > 1800:
             free = free_ram_gb()
@@ -329,6 +347,7 @@ def main() -> int:
 
         if is_success(status):
             stats["ok"] += 1
+            consecutive_failures = 0  # audit fix: breaker đếm lại từ đầu
             pause = random.uniform(*PAUSE_OK)
             log(f"SUCCESS — sleep {pause:.0f}s before next")
             time.sleep(pause)
@@ -336,7 +355,15 @@ def main() -> int:
             stats["fail"] += 1
             if "timeout" in (status or "").lower():
                 stats["timeout"] += 1
-            log(f"FAIL — short pause then retry with NEW mail")
+            # Audit fix 2026-09: circuit breaker — trước đây loop chạy fail liên
+            # tục tới 06:00 (spawn/kill Chrome mỗi ~30s) khi Chrome/proxy/mail
+            # chết hệ thống. 12 fail liên tiếp → STOP để owner dậy xem log.
+            consecutive_failures += 1
+            if consecutive_failures >= 12:
+                log(f"CIRCUIT BREAKER — {consecutive_failures} fail liên tiếp, dừng overnight (đặt STOP file trước nếu muốn chạy lại).")
+                stats["breaker_stop"] = True
+                break
+            log(f"FAIL — short pause then retry with NEW mail ({consecutive_failures} liên tiếp)")
             time.sleep(random.uniform(*PAUSE_FAIL))
 
         if run_id % 10 == 0:

@@ -89,7 +89,9 @@ def run_backup(root: Path) -> dict[str, Any]:
         "missing": [],
         "bytes": 0,
     }
-    if dest_root.is_dir():
+    if (dest_root / ".done").is_file():
+        # folder hôm nay đã backup HOÀN CHỈNH — run giữa chừng chết thì không
+        # có marker, lần chạy sau sẽ chép đè bổ sung thay vì skip cả ngày.
         report["skipped"] = True
         return report
 
@@ -109,6 +111,11 @@ def run_backup(root: Path) -> dict[str, Any]:
             report["bytes"] += dest.stat().st_size
         except Exception:
             logger.warning("[backup] copy %s failed", rel, exc_info=True)
+
+    try:
+        (dest_root / ".done").write_text("ok", encoding="utf-8")
+    except Exception:
+        logger.warning("[backup] cannot write .done marker", exc_info=True)
 
     report["pruned_days"] = prune_old(root)
     if report["copied"]:

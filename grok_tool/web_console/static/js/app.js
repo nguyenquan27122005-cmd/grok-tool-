@@ -99,7 +99,11 @@ function isHotmailMail(val) {
 }
 
 const SHEET_ONLY = ['heygen', 'capcut', 'zai', 'canva', 'netflix', 'manus', 'notion', 'genspark'];
-const HAS_HOTMAIL = ['grok', ...SHEET_ONLY.filter((id) => id !== 'notion')];
+// mỗi tool có pool Hotmail RIÊNG (data/hotmails.txt trong thư mục tool) — không dùng chung với Grok
+const HAS_HOTMAIL = [
+  'grok', 'heygen', 'capcut', 'zai', 'canva', 'netflix', 'manus', 'genspark',
+  'claude', 'dreamina', 'openart', 'scispace', 'xpilot',
+];
 
 function isSheetOnly(id) {
   return SHEET_ONLY.includes(id);
@@ -227,7 +231,8 @@ function esc(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function lineClass(line) {
@@ -299,6 +304,28 @@ function syncCanvaJobUi(root) {
     if (plan) plan.hidden = true;
     const countWrap = root.querySelector('[data-field-wrap="count"]');
     if (countWrap) countWrap.hidden = true;
+  }
+}
+
+// OpenArt/SciSpace — chế độ "Lấy link thanh toán" không dùng mail/count:
+// chỉ hiện cấu hình checkout, ẩn phần reg; chế độ reg thì ngược lại.
+function syncCheckoutJobUi(root) {
+  const tool = (state.tools || []).find((t) => t.id === state.selectedTool);
+  const jobF = tool && (tool.fields || []).find((f) => f.key === 'job');
+  if (!jobF || !(jobF.options || []).some((o) => o.value === 'checkout')) return;
+  const checkout = String(state.form.job || 'reg') === 'checkout';
+  const setWrap = (key, on) => {
+    const el = root.querySelector(`[data-field-wrap="${key}"]`);
+    if (el) el.hidden = !on;
+  };
+  ['checkout_plans', 'checkout_interval', 'push_gsheet'].forEach((k) => setWrap(k, checkout));
+  ['mail', 'count', 'threads', 'resume'].forEach((k) => setWrap(k, !checkout));
+  if (checkout) {
+    setWrap('custom_domain', false);
+    setWrap('custom_read_mailbox', false);
+  } else {
+    syncHotmailUi(root);
+    syncCustomDomainUi(root);
   }
 }
 
@@ -630,6 +657,7 @@ function bindToolForm(root, tool) {
       if (key === 'mail') syncHotmailUi(root);
       if (key === 'mail') syncCustomDomainUi(root);
       if (key === 'job') syncCanvaJobUi(root);
+      if (key === 'job') syncCheckoutJobUi(root);
     };
     el.addEventListener('change', sync);
     el.addEventListener('input', sync);
@@ -638,9 +666,16 @@ function bindToolForm(root, tool) {
   syncHotmailUi(root);
   syncCustomDomainUi(root);
   syncCanvaJobUi(root);
+  syncCheckoutJobUi(root);
 }
 
 async function onStart(ev) {
+  if (state.starting) return; // chặn double-click trước các await xác nhận
+  state.starting = true;
+  try { return await _onStartInner(ev); } finally { state.starting = false; }
+}
+
+async function _onStartInner(ev) {
   const root = document.getElementById('main-content');
   const btn = ev.currentTarget;
   try {
@@ -660,7 +695,7 @@ async function onStart(ev) {
         toast('Dán mã redeem vào ô Mã redeem (mỗi dòng 1 mã)', 'err');
         return;
       }
-    } else if (isHotmailMail(state.form.mail)) {
+    } else if (state.form.job !== 'checkout' && isHotmailMail(state.form.mail)) {
       try {
         state.hotmailPool = await getHotmails(state.selectedTool);
       } catch (_) {}
@@ -1192,7 +1227,8 @@ function filterRows(rows) {
 
 function rowsToCsv(rows) {
   const escCell = (v) => {
-    const s = String(v ?? '');
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // chặn CSV formula injection (Excel)
     return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const head = 'email,password,status,extra';
@@ -1997,8 +2033,10 @@ function applyJobSnapshot(snap, opts = {}) {
         state.job.id ? ' · ' + state.job.id : ''
       }${qn ? ` · queue ${qn}` : ''}`;
     }
-    // gom log kể cả khi đang ở trang khác — paint chỉ khi có hộp log
-    mergeJobLogs(state.job);
+    // gom log kể cả khi đang ở trang khác — paint chỉ khi có hộp log.
+    // skipLogs (poll 20s) phải bỏ merge luôn: server trả window 300 dòng
+    // cuối, merge sẽ co log hiển thị về 300 dòng mỗi lần poll.
+    if (!opts.skipLogs) mergeJobLogs(state.job);
     // paint gom theo frame thay vì vẽ ngay từng bản tin SSE
     if (box && !opts.skipLogs) scheduleLogPaint(box);
   }

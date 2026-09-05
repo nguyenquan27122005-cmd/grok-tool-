@@ -85,12 +85,18 @@ class BaseToolPlugin:
         return None
 
     def apply_proxy(self, cmd: list[str], params: dict[str, Any], root: Any, proxy: str) -> list[str]:
-        """Console gọi trước khi spawn khi pool proxy đang bật."""
+        """Console gọi trước khi spawn khi pool proxy đang bật (hoặc tắt để dọn)."""
         from web_console import proxy_pool
 
         path = self.proxy_config_path(root)
         if path is not None:
-            proxy_pool.apply_proxy_to_config(Path(path), proxy)
+            pool: Optional[list[str]] = None
+            if str(proxy or "").strip():
+                try:
+                    pool = list(proxy_pool.get_state().get("proxies") or [])
+                except Exception:  # noqa: BLE001 — không lấy được pool thì bơm 1 IP
+                    pool = None
+            proxy_pool.apply_proxy_to_config(Path(path), proxy, pool=pool)
         return cmd
 
     def build_command(self, params: dict[str, Any], root: Any) -> list[str]:

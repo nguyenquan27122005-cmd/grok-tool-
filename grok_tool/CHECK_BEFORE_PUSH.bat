@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 chcp 65001 >nul
 cd /d "%~dp0"
 title Check secrets before GitHub push
@@ -20,10 +21,10 @@ echo.
 if exist ".git" (
     echo  === Quet file dang git add --staged ===
     venv\Scripts\python.exe scripts\check_no_secrets.py --staged
-    set E2=%ERRORLEVEL%
+    set E2=!ERRORLEVEL!
 ) else (
     echo  [i] Chua git init — chi quet working tree.
-    set E2=0
+    set "E2=0"
 )
 
 echo.

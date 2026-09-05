@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Day batch: reg + Sub2API until TARGET new FULL or stop clock.
 
@@ -13,7 +13,7 @@ import random
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,9 +44,16 @@ def parse_stop(hm: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2))
 
 
-def should_stop_time(h: int, mi: int) -> bool:
+def should_stop_time(h: int, mi: int, start: datetime) -> bool:
+    """Audit fix v2: dừng khi `now` vượt mốc ĐẦU TIÊN sau khi batch start.
+    Version 2026-09 dời mốc về hôm qua khi start trước giờ cắt → `n >= stop`
+    luôn True → batch dừng ngay sau khi chạy. Giờ: start 08:00 mốc 10:30
+    → chạy tới 10:30 hôm nay; start 22:00 → chạy tới 10:30 ngày mai."""
     n = datetime.now()
-    return (n.hour, n.minute) >= (h, mi)
+    stop = start.replace(hour=h, minute=mi, second=0, microsecond=0)
+    if stop <= start:
+        stop += timedelta(days=1)  # mốc hôm nay đã qua lúc start → mốc mai
+    return n >= stop
 
 
 def main() -> int:
@@ -96,11 +103,12 @@ def main() -> int:
 
     stats = {"runs": 0, "ok": 0, "full": 0, "fail": 0, "timeout": 0}
     run_id = 0
+    run_start = datetime.now()
     stop_reason = "unknown"
 
     try:
         while True:
-            if should_stop_time(stop_h, stop_m):
+            if should_stop_time(stop_h, stop_m, run_start):
                 stop_reason = f"time>={stop_h:02d}:{stop_m:02d}"
                 break
             cur = count_full()

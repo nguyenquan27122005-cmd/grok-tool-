@@ -89,6 +89,38 @@ def load_config() -> dict[str, Any]:
             ],
         },
     )
+    # https://tmail.spectxte.bond — private REST API, Bearer = web password
+    # token set trong config.json (không commit key)
+    cfg.setdefault(
+        "tmail_spectxte",
+        {
+            "base_url": "https://tmail.spectxte.bond",
+            "token": "",
+            "verify_ssl": True,
+            "poll_interval": 3,
+            "domains": ["spectxte.bond", "luciferz.bond"],
+        },
+    )
+    # --- reg_speed: fast (default, ~30–90s browser) | safe (slow humanize) ---
+    # Phải resolve TRƯỚC các generic setdefault bên dưới — setdefault chạy
+    # trước sẽ chiếm key và biến toàn bộ override của fast thành no-op.
+    cfg.setdefault("reg_speed", "fast")
+    speed = str(cfg.get("reg_speed") or "fast").strip().lower()
+    if speed == "fast":
+        cfg.setdefault("castle_warmup_sec", 3)
+        cfg.setdefault("castle_wait_token_sec", 10)
+        cfg.setdefault("human_delay_min", 0.35)
+        cfg.setdefault("human_delay_max", 1.1)
+        cfg.setdefault("cf_wait_sec", 22)
+        cfg.setdefault("turnstile_before_email_sec", 8)
+        cfg.setdefault("timeout_otp", 120)
+        cfg.setdefault("open_grok_after_success", False)
+        cfg.setdefault("inter_success_delay_min", 8)
+        cfg.setdefault("inter_success_delay_max", 20)
+    else:  # safe — slower humanize, longer Castle window
+        cfg.setdefault("castle_warmup_sec", 12)
+        cfg.setdefault("castle_wait_token_sec", 28)
+
     # --- anti-flag / overnight defaults ---
     cfg.setdefault("fresh_profile_per_account", True)
     cfg.setdefault("reuse_chrome_profile", False)
@@ -126,29 +158,9 @@ def load_config() -> dict[str, Any]:
         cfg["antiflag"].setdefault("align_tz_to_ip", True)
         cfg["antiflag"].setdefault("browser_preferences", True)
         cfg["antiflag"].setdefault("stealth_inject", False)
-    # reg_speed: fast (default, closer to competitor ~30–90s browser)
-    #             safe (slower humanize / longer Castle)
-    cfg.setdefault("reg_speed", "fast")
-    speed = str(cfg.get("reg_speed") or "fast").strip().lower()
-    if speed == "fast":
-        cfg.setdefault("castle_warmup_sec", 3)
-        cfg.setdefault("castle_wait_token_sec", 10)
-        cfg.setdefault("human_delay_min", 0.35)
-        cfg.setdefault("human_delay_max", 1.1)
-        cfg.setdefault("cf_wait_sec", 22)
-        cfg.setdefault("turnstile_before_email_sec", 8)
-        cfg.setdefault("timeout_otp", 120)
-        cfg.setdefault("open_grok_after_success", False)
-        cfg.setdefault("inter_success_delay_min", 8)
-        cfg.setdefault("inter_success_delay_max", 20)
-        if isinstance(cfg.get("antiflag"), dict):
+        if speed == "fast":
             cfg["antiflag"].setdefault("human_typing", False)
             cfg["antiflag"].setdefault("pre_click_jiggle", False)
-    else:
-        cfg.setdefault("castle_warmup_sec", 12)
-        cfg.setdefault("castle_wait_token_sec", 28)
-    cfg.setdefault("castle_warmup_sec", 12)
-    cfg.setdefault("castle_wait_token_sec", 28)
     cfg.setdefault("castle_retry_on_mint_fail", 1)
     cfg.setdefault("proxy", "")
     cfg.setdefault("headless", False)

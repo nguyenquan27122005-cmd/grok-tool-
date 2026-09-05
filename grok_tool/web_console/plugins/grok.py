@@ -26,10 +26,11 @@ class GrokToolPlugin(BaseToolPlugin):
                 type="select",
                 default="0",
                 options=[
-                    FieldOption("0", "Temp SMART", "azpop ↔ tmail failover"),
+                    FieldOption("0", "Temp SMART", "azpop ↔ wibu ↔ spectxte failover"),
                     FieldOption("1", "Hotmail", "1 acc → tối đa 5 Grok (mail / mail+1 … +4)"),
                     FieldOption("2", "Temp azpop only", ""),
                     FieldOption("3", "Temp tmail.wibu only", ""),
+                    FieldOption("6", "Temp tmail.spectxte only", "API key riêng trong config tmail_spectxte"),
                     FieldOption("5", "Domain riêng", "random@domain — forward về Hotmail pool"),
                 ],
             ),
@@ -153,10 +154,12 @@ class GrokToolPlugin(BaseToolPlugin):
                     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
                     if str(raw.get("custom_read_mailbox") or "") != mb:
                         raw["custom_read_mailbox"] = mb
-                        cfg_path.write_text(
+                        tmp = cfg_path.with_suffix(".tmp")
+                        tmp.write_text(
                             json.dumps(raw, indent=1, ensure_ascii=False) + "\n",
                             encoding="utf-8",
                         )
+                        tmp.replace(cfg_path)  # atomic — tránh corrupt config
                 except Exception:
                     pass
         mail = str(params.get("mail") or "0")
@@ -173,7 +176,8 @@ class GrokToolPlugin(BaseToolPlugin):
         if backend not in ("github", "protocol", "auto", "browser"):
             backend = "github"
         # Protocol/GitHub + temp mail: azpop nhận được OTP xAI, tmail thì không.
-        # Domain riêng ("5") giữ nguyên — OTP đọc qua Hotmail pool (mail_api).
+        # tmail_spectxte ("6") giữ nguyên — REST API riêng có key. Domain riêng
+        # ("5") giữ nguyên — OTP đọc qua Hotmail pool (mail_api).
         if backend in (
             "github",
             "protocol",
@@ -181,7 +185,7 @@ class GrokToolPlugin(BaseToolPlugin):
             "http",
             "pure_http",
             "castle",
-        ) and not self._is_hotmail_mail(mail) and mail != "5":
+        ) and not self._is_hotmail_mail(mail) and mail not in ("5", "6"):
             mail = "2"
         return [
             str(py),
@@ -397,10 +401,10 @@ class GrokToolPlugin(BaseToolPlugin):
         p = Path(rel)
         return p if p.is_absolute() else (root / p)
 
-    def hotmail_pool(self, root: Path) -> dict[str, Any]:
+    def hotmail_pool(self, root: Path, path: Path | None = None) -> dict[str, Any]:
         from grokreg.mail.hotmail_import import parse_hotmail_text
 
-        path = self._hotmail_path(root)
+        path = path or self._hotmail_path(root)
         raw = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
         parsed = parse_hotmail_text(raw)
         accounts: list[dict[str, Any]] = []
@@ -437,7 +441,7 @@ class GrokToolPlugin(BaseToolPlugin):
         }
 
     def import_hotmails(
-        self, root: Path, text: str, mode: str = "append"
+        self, root: Path, text: str, mode: str = "append", path: Path | None = None
     ) -> dict[str, Any]:
         from grokreg.mail.hotmail_import import format_line, parse_hotmail_text
 
@@ -455,7 +459,7 @@ class GrokToolPlugin(BaseToolPlugin):
                 f"Ví dụ lỗi: {hint}"
             )
 
-        path = self._hotmail_path(root)
+        path = path or self._hotmail_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         existing_raw = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
         existing = parse_hotmail_text(existing_raw)
@@ -483,7 +487,7 @@ class GrokToolPlugin(BaseToolPlugin):
             for r in have.values()
         ]
         path.write_text(("\n".join(lines) + ("\n" if lines else "")), encoding="utf-8")
-        pool = self.hotmail_pool(root)
+        pool = self.hotmail_pool(root, path=path)
         pool.update(
             {
                 "ok": True,

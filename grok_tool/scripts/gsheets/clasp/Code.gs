@@ -10,7 +10,8 @@
  */
 
 // Set in Apps Script project settings / Script Properties, or edit locally (do not commit real value)
-var SECRET = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET') || 'grok-overnight-export';
+var SECRET = PropertiesService.getScriptProperties().getProperty('WEBAPP_SECRET');
+if (!SECRET) { throw new Error('WEBAPP_SECRET chua set trong Script Properties — tu choi moi request.'); }
 var DEFAULT_GID = 0;
 var TAB_NAME = 'grok';
 var DEFAULT_PASS = '';
@@ -38,6 +39,9 @@ function doPost(e) {
     if (action === 'append') {
       return jsonOut_({ ok: true, result: appendAccount_(body) });
     }
+    if (action === 'append_checkout') {
+      return jsonOut_({ ok: true, result: appendCheckout_(body) });
+    }
     return jsonOut_({ ok: true, result: writePayload_(body) });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
@@ -63,7 +67,8 @@ function tabNameOf_(body) {
   var t = String((body && (body.tab || body.tab_name)) || '').trim().toLowerCase();
   var ok = {
     grok: 1, heygen: 1, capcut: 1, canva: 1, zai: 1, netflix: 1, manus: 1, notion: 1,
-    dreamina: 1
+    dreamina: 1, openart: 1, scispace: 1, claude: 1, chatgpt: 1, genspark: 1, gpt: 1,
+    xpilot: 1
   };
   return ok[t] ? t : 'grok';
 }
@@ -83,7 +88,31 @@ function titleOf_(tabName) {
   if (tabName === 'manus') return 'MANUS REG  ·  ACC THÀNH CÔNG';
   if (tabName === 'notion') return 'NOTION REG  ·  ACC CÓ OFFER 1/3/6 THÁNG';
   if (tabName === 'dreamina') return 'DREAMINA REG  ·  ACC + CREDIT';
+  if (tabName === 'xpilot') return 'XPILOT REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'openart') return 'OPENART REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'scispace') return 'SCISPACE REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'claude') return 'CLAUDE REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'chatgpt') return 'CHATGPT REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'genspark') return 'GENSPARK REG  ·  ACC THÀNH CÔNG';
+  if (tabName === 'gpt') return 'GPT / OPENAI REG  ·  ACC THÀNH CÔNG';
   return 'GROK REG  ·  ACC THÀNH CÔNG';
+}
+
+/** Sửa 1 lần: banner "GROK REG" trên các tab tool mới tạo trước khi có titleOf_ riêng. */
+function fixNewTabTitles() {
+  var ss = SpreadsheetApp.openById('1SeghtwP7_AgwPyH8fSXiUWsW6zbf8R0_HmkfEHtf_GI');
+  var fixed = [];
+  ['openart', 'scispace', 'claude', 'chatgpt', 'genspark', 'gpt', 'xpilot'].forEach(function (t) {
+    var sh = ss.getSheetByName(t);
+    if (!sh) return;
+    var cur = String(sh.getRange(1, 1).getValue() || '');
+    if (cur.indexOf('GROK REG') === 0) {
+      sh.getRange(1, 1).setValue(titleOf_(t));
+      fixed.push(t);
+    }
+  });
+  Logger.log('fixed: ' + fixed.join(', '));
+  return fixed;
 }
 
 function nameColOf_(tabName) {
@@ -176,6 +205,33 @@ function findHeaderRow_(values) {  for (var i = 0; i < values.length; i++) {
 }
 
 /** Mỗi acc thành công → thêm/cập nhật 1 dòng, không ghi đè cả bảng. */
+function appendCheckout_(body) {
+  var ss = (body && body.spreadsheet_id)
+    ? SpreadsheetApp.openById(body.spreadsheet_id)
+    : SpreadsheetApp.getActiveSpreadsheet();
+  var base = tabNameOf_(body);
+  if (base === 'grok' && body.tab && !tabNameOf_({tab: body.tab}).match(/^grok$/)) base = String(body.tab).toLowerCase();
+  var tabName = base + '_checkout';
+  var dash = ss.getSheetByName(tabName);
+  if (!dash) {
+    dash = ss.insertSheet(tabName);
+    dash.getRange(1, 1, 1, 6).setValues([['#', 'Email', 'Gói', 'Chu kỳ', 'Link Stripe', 'Ngày giờ']]);
+    dash.getRange(1, 1, 1, 6).setFontWeight('bold');
+    dash.setFrozenRows(1);
+  }
+  var rows = (body && body.rows) || [];
+  if (!rows.length) return { tab: tabName, added: 0 };
+  var start = dash.getLastRow() + 1;
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i] || {};
+    out.push([start + i, String(r.email || ''), String(r.plan || ''), String(r.interval || ''),
+      String(r.url || ''), String(r.ts || Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd HH:mm:ss'))]);
+  }
+  dash.getRange(start, 1, out.length, 6).setValues(out);
+  return { tab: tabName, added: out.length };
+}
+
 function appendAccount_(body) {
   var ss = (body && body.spreadsheet_id)
     ? SpreadsheetApp.openById(body.spreadsheet_id)

@@ -143,6 +143,7 @@ def run_loop(host: str, port: int) -> None:
         proc: subprocess.Popen | None = None
         logf = None
         code = 0
+        _spawn_ts = 0.0
         try:
             # Append server stdout/stderr to daemon log
             logf = open(LOG_FILE, "a", encoding="utf-8")
@@ -161,6 +162,7 @@ def run_loop(host: str, port: int) -> None:
                 stderr=subprocess.STDOUT,
                 **hide,
             )
+            _spawn_ts = time.time()  # để reset backoff khi child sống ổn
 
             # Poll thay vì wait() block: child có thể "sống mà điếc" — process
             # còn nhưng listener chết (VD WinError 10055 cạn socket buffer khi
@@ -215,7 +217,10 @@ def run_loop(host: str, port: int) -> None:
         # brief backoff before restart (crash loop protection)
         _log(f"restart in {backoff}s…")
         time.sleep(backoff)
-        backoff = min(30, backoff + 2)
+        # chạy ổn định ≥10 phút thì reset backoff — vài crash đơn lẻ xa xôi
+        # không phải sống chung với 30s chờ mãi mãi
+        backoff = 2 if (proc is not None and proc.poll() is not None and
+                        time.time() - _spawn_ts > 600) else min(30, backoff + 2)
 
 
 def _startup_dir() -> Path:

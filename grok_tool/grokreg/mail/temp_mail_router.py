@@ -2,8 +2,9 @@
 Temp-mail failover: prefer the healthier provider, switch when lagging.
 
 Providers:
-  - azpopmail   (https://azpopmail.com/document)
-  - tmail_wibu  (https://tmail.wibucrypto.pro Livewire)
+  - azpopmail      (https://azpopmail.com/document)
+  - tmail_wibu     (https://tmail.wibucrypto.pro Livewire)
+  - tmail_spectxte (https://tmail.spectxte.bond REST)
 
 Per-run pick (cannot swap mid-OTP after email is submitted on xAI).
 After OTP timeout / create fail → mark lag → next run prefers the other.
@@ -23,7 +24,7 @@ log = logging.getLogger("grok-reg")
 ROOT = Path(__file__).resolve().parents[2]
 STATS_PATH = ROOT / "data" / "temp_provider_stats.json"
 
-PROVIDERS = ("azpopmail", "tmail_wibu")
+PROVIDERS = ("azpopmail", "tmail_wibu", "tmail_spectxte")
 # After this many consecutive fails, hard-prefer the other for a while
 STREAK_SWITCH = 1
 # Soft cooldown after fail (seconds)

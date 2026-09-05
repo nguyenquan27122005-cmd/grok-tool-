@@ -185,7 +185,15 @@ def _all_full_from_accounts() -> list[dict]:
                 seen.add(em)
         order.reverse()
         return order if order else out
-    except Exception:
+    except Exception as e:
+        # Nuốt lỗi ở đây = bước clear() phía sau xoá sạch tab "Acc FULL" về
+        # "(trống)". accounts.txt bị lock tạm (Windows) là chuyện thường —
+        # file đang tồn tại mà đọc lỗi thì abort push, đừng trả rỗng.
+        accounts_file = ROOT / "data" / "accounts.txt"
+        if accounts_file.exists():
+            raise RuntimeError(
+                f"đọc accounts.txt thất bại ({e}) — abort push để không xoá sheet"
+            ) from e
         return []
 
 

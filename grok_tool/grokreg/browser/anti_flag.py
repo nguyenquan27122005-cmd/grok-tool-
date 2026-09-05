@@ -34,11 +34,14 @@ def _detect_chrome_major() -> str:
                 continue
             # version folder next to chrome.exe
             parent = exe.parent
-            for child in parent.iterdir():
-                if child.is_dir() and re.match(r"^\d+\.", child.name):
-                    maj = child.name.split(".")[0]
-                    if maj.isdigit():
-                        return maj
+            versions = [
+                child.name
+                for child in parent.iterdir()
+                if child.is_dir() and re.match(r"^\d+\.", child.name)
+                and child.name.split(".")[0].isdigit()
+            ]
+            if versions:
+                return max(versions, key=lambda v: tuple(int(x) for x in v.split(".")))
             from grokreg.core import winhide
 
             r = subprocess.run(
@@ -1289,6 +1292,76 @@ STEALTH_JS = r"""
 """
 
 
+_LAST_CLEANUP = 0.0
+
+
+def _cleanup_old_profiles(base: Path, keep_hours: float = 24.0) -> None:
+    """Dọn profile run_* cũ hơn keep_hours — throttle 1 lần/10 phút mỗi process."""
+    global _LAST_CLEANUP
+    now = time.time()
+    if now - _LAST_CLEANUP < 600:
+        return
+    _LAST_CLEANUP = now
+    runs = base / "chrome_runs"
+    if not runs.is_dir():
+        return
+    import shutil
+
+    for d in runs.glob("run_*"):
+        try:
+            if d.is_dir() and now - d.stat().st_mtime > keep_hours * 3600:
+                shutil.rmtree(d, ignore_errors=True)
+        except Exception:  # noqa: BLE001 — dọn được bao nhiêu hay bấy nhiêu
+            pass
+
+
+def harden_options(
+    config: dict[str, Any],
+    options: Any,
+    *,
+    engine_root: Path | None = None,
+    profile_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Lớp anti-flag "miễn phí tốc độ" cho sibling engines (pydoll Chrome).
+
+    Fingerprint args (viewport ngẫu nhiên, lang, webrtc, canvas) + browser
+    prefs + profile: fresh-per-account mặc định (chrome_runs/run_*), fallback
+    chrome_user_data_dir. Engine TỰ lo: --remote-debugging-port,
+    window-position, headless, proxy. Trả fp — dùng cho
+    inject_stealth(tab, fp, exec_js) sau khi mở trang (config["_fingerprint"]).
+    """
+    fp = pick_fingerprint(config)
+
+    def _add(opts: Any, arg: str) -> None:
+        try:
+            opts.add_argument(arg)
+        except Exception:
+            pass
+
+    apply_chrome_fingerprint_args(options, fp, _add)
+    af_cfg = config.get("antiflag") if isinstance(config.get("antiflag"), dict) else {}
+    if not isinstance(af_cfg, dict) or af_cfg.get("browser_preferences", True):
+        apply_browser_preferences(options, fp)
+
+    fresh = bool(config.get("fresh_profile_per_account", True))
+    base = engine_root or ROOT
+    try:
+        _cleanup_old_profiles(base)
+    except Exception:  # noqa: BLE001 — dọn fail không được giết launch
+        pass
+    if profile_dir is not None:
+        profile = Path(profile_dir)
+    elif fresh:
+        profile = fresh_profile_dir(base / "chrome_runs")
+    else:
+        profile = Path(str(config.get("chrome_user_data_dir") or "chrome_profile"))
+        if not profile.is_absolute():
+            profile = base / profile
+    profile.mkdir(parents=True, exist_ok=True)
+    _add(options, f"--user-data-dir={to_windows_path(profile)}")
+    return fp
+
+
 def build_stealth_script(fp: dict[str, Any], *, full: bool = False) -> str:
     """
     Build inject JS.
@@ -1367,6 +1440,33 @@ async def _cdp_set_timezone(tab: Any, tz: str) -> None:
             await tab.call("Emulation.setTimezoneOverride", timezoneId=tz)
     except Exception as e:
         log.debug("timezone override: %s", e)
+
+
+async def enable_stealth_auto(tab: Any, fp: dict[str, Any]) -> bool:
+    """Stealth JS tự chạy trên MỌI document mới (CDP addScriptToEvaluateOnNewDocument).
+
+    SPA/multi-step signup không phải inject lại từng trang. CDP fail → trả
+    False, caller vẫn còn fingerprint CLI args + browser prefs từ
+    harden_options. TZ override chỉ khi fp yêu cầu (OS≠IP).
+    """
+    try:
+        full = bool(
+            fp.get("stealth_full")
+            or fp.get("patch_canvas")
+            or fp.get("patch_webgl")
+            or fp.get("patch_audio")
+            or fp.get("patch_hardware")
+        )
+        script = build_stealth_script(fp, full=full)
+        ok = await _cdp_call(tab, "Page.addScriptToEvaluateOnNewDocument", {"source": script})
+        if ok and fp.get("timezone_cdp_override") and fp.get("timezone"):
+            await _cdp_call(
+                tab, "Emulation.setTimezoneOverride", {"timezoneId": str(fp["timezone"])}
+            )
+        return bool(ok)
+    except Exception as e:
+        log.debug("stealth auto: %s", e)
+        return False
 
 
 async def inject_stealth(tab: Any, fp: dict[str, Any], exec_js) -> None:
@@ -1899,19 +1999,27 @@ def _load_json(path: Path) -> dict:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        pass
+        log.warning("stats file hỏng, reset: %s", path.name)
     return {}
 
 
 def _save_json(path: Path, data: dict) -> None:
     try:
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)  # atomic — crash giữa write không reset stats
     except Exception:
-        pass
+        log.warning("stats save failed: %s", path.name)
 
 
 def mark_mail_fail(email: str, minutes: int = 120, reason: str = "") -> None:
     data = _load_json(FAIL_COOLDOWN_PATH)
+    # prune entry hết hạn — file này append mãi không clear
+    data = {
+        k: v
+        for k, v in data.items()
+        if isinstance(v, dict) and float(v.get("until") or 0) > time.time()
+    }
     data[email.lower()] = {
         "until": time.time() + minutes * 60,
         "reason": reason[:120],

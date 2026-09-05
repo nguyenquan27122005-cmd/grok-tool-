@@ -31,6 +31,7 @@ _MAX_CONSECUTIVE_FAILURES = 3
 _READY_TIMEOUT_SEC = 45
 
 _proc: subprocess.Popen | None = None
+_starting = False  # start() đang chờ child bind port — chặn spawn đôi
 _lock = threading.Lock()
 _consecutive_failures = 0
 _last_failure_reason = ''
@@ -157,11 +158,13 @@ def get_status(url: str | None = None) -> dict[str, Any]:
         else endpoint['url']
     )
     running = is_running(probe_url)
+    # snapshot — stop() có thể set _proc=None giữa 2 lần .poll()
+    proc = _proc
     info: dict[str, Any] = {
         'running': running,
         'online': running,
-        'managed': _owned_by_us and _proc is not None and _proc.poll() is None,
-        'pid': _proc.pid if (_proc is not None and _proc.poll() is None) else None,
+        'managed': _owned_by_us and proc is not None and proc.poll() is None,
+        'pid': proc.pid if (proc is not None and proc.poll() is None) else None,
         'url': probe_url if endpoint['manageable'] else endpoint['url'],
         'port': endpoint['port'],
         'manageable': endpoint['manageable'],
@@ -234,7 +237,7 @@ def start(
 ) -> dict[str, Any]:
     """Start the local solver if needed. Returns a status dict."""
     global _proc, _consecutive_failures, _last_failure_reason, _owned_by_us
-    global _managed_port, _managed_url
+    global _managed_port, _managed_url, _starting
 
     settings = settings_from_config(settings)
     endpoint = configure_from_settings(settings)
@@ -299,6 +302,13 @@ def start(
             logger.error('[Solver] %s', exc)
             return get_status(_managed_url)
 
+        # cờ chống spawn đôi: 2 thread start() cùng lúc khi child chưa bind port
+        global _starting
+        if _starting:
+            logger.info('[Solver] start đang chạy — bỏ qua yêu cầu trùng')
+            return get_status(_managed_url)
+        _starting = True
+
         logger.info('[Solver] starting: %s', ' '.join(cmd))
         try:
             child_env = {
@@ -327,6 +337,7 @@ def start(
                 popen_kw['start_new_session'] = True
             _proc = subprocess.Popen(cmd, **popen_kw)
             _owned_by_us = True
+            proc = _proc
         except Exception as exc:
             _consecutive_failures += 1
             _last_failure_reason = f'无法创建子进程: {exc}'
@@ -334,58 +345,79 @@ def start(
             _proc = None
             _owned_by_us = False
             return get_status(_managed_url)
+        finally:
+            if not _owned_by_us:
+                _starting = False
 
-        for _ in range(_READY_TIMEOUT_SEC):
-            time.sleep(1)
-            if _proc.poll() is not None:
-                stderr_msg = ''
-                try:
-                    if _proc.stderr:
-                        stderr_msg = _proc.stderr.read().decode(
-                            'utf-8', errors='replace',
-                        )[:800]
-                except Exception:
-                    pass
-                _consecutive_failures += 1
-                _last_failure_reason = stderr_msg or f'进程退出 code={_proc.returncode}'
-                logger.error(
-                    '[Solver] child exited code=%s (fail %s/%s)%s',
-                    _proc.returncode,
-                    _consecutive_failures,
-                    _MAX_CONSECUTIVE_FAILURES,
-                    f' stderr={stderr_msg}' if stderr_msg else '',
-                )
-                _proc = None
-                _owned_by_us = False
-                return get_status(_managed_url)
-            if is_running(_managed_url):
-                logger.info('[Solver] online PID=%s url=%s', _proc.pid, _managed_url)
-                _consecutive_failures = 0
-                _last_failure_reason = ''
-                try:
-                    if _proc.stderr:
-                        _proc.stderr.close()
-                except Exception:
-                    pass
-                return get_status(_managed_url)
-
-        _consecutive_failures += 1
-        stderr_msg = ''
+        # Chờ ready NGOÀI lock — giữ lock suốt 45s làm stop()/restart()/UI
+        # start() đứng hình. _starting + snapshot `proc` giữ an toàn.
         try:
-            if _proc and _proc.stderr:
-                stderr_msg = _proc.stderr.read(2000).decode('utf-8', errors='replace')
-                _proc.stderr.close()
-        except Exception:
-            pass
-        _last_failure_reason = f'启动超时（{_READY_TIMEOUT_SEC}s） {stderr_msg}'.strip()
-        logger.error('[Solver] %s', _last_failure_reason)
-        return get_status(_managed_url)
+            for _ in range(_READY_TIMEOUT_SEC):
+                time.sleep(1)
+                if proc.poll() is not None:
+                    stderr_msg = ''
+                    try:
+                        if proc.stderr:
+                            stderr_msg = proc.stderr.read().decode(
+                                'utf-8', errors='replace',
+                            )[:800]
+                    except Exception:
+                        pass
+                    _consecutive_failures += 1
+                    _last_failure_reason = stderr_msg or f'进程退出 code={proc.returncode}'
+                    logger.error(
+                        '[Solver] child exited code=%s (fail %s/%s)%s',
+                        proc.returncode,
+                        _consecutive_failures,
+                        _MAX_CONSECUTIVE_FAILURES,
+                        f' stderr={stderr_msg}' if stderr_msg else '',
+                    )
+                    _proc = None
+                    _owned_by_us = False
+                    return get_status(_managed_url)
+                if is_running(_managed_url):
+                    logger.info('[Solver] online PID=%s url=%s', proc.pid, _managed_url)
+                    _consecutive_failures = 0
+                    _last_failure_reason = ''
+                    try:
+                        if proc.stderr:
+                            proc.stderr.close()
+                    except Exception:
+                        pass
+                    return get_status(_managed_url)
+
+            _consecutive_failures += 1
+            # child không bind port sau 45s = hỏng — kill để không chiếm cổng,
+            # rồi mới đọc stderr (read() chỉ trả về khi pipe đóng).
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            stderr_msg = ''
+            try:
+                if proc.stderr:
+                    stderr_msg = proc.stderr.read(2000).decode('utf-8', errors='replace')
+                    proc.stderr.close()
+            except Exception:
+                pass
+            _last_failure_reason = f'启动超时（{_READY_TIMEOUT_SEC}s） {stderr_msg}'.strip()
+            logger.error('[Solver] %s', _last_failure_reason)
+            _proc = None
+            _owned_by_us = False
+            return get_status(_managed_url)
+        finally:
+            _starting = False
 
 
 def stop(*, kill_orphans: bool = False) -> dict[str, Any]:
     """Stop the child we spawned. Optionally clear anything on the managed port."""
     global _proc, _owned_by_us
     with _lock:
+        stopped = True
         if _proc is not None and _proc.poll() is None:
             logger.info('[Solver] terminating PID=%s', _proc.pid)
             _proc.terminate()
@@ -396,10 +428,18 @@ def stop(*, kill_orphans: bool = False) -> dict[str, Any]:
                 try:
                     _proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
-                    pass
+                    # giữ tham chiếu — clear _proc ở đây = mất đứa con còn sống
+                    # giữ cổng, stop() sau không còn gì để kill
+                    stopped = False
             logger.info('[Solver] child stopped')
-        _proc = None
-        _owned_by_us = False
+        if stopped:
+            _proc = None
+            _owned_by_us = False
+        else:
+            logger.error(
+                '[Solver] child PID=%s không chết sau SIGKILL — giữ tham chiếu',
+                _proc.pid if _proc else -1,
+            )
 
         if kill_orphans and is_running(_managed_url):
             _kill_by_port(_managed_port)

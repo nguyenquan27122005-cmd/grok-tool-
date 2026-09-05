@@ -213,7 +213,7 @@ def is_blocked_path(p: Path, base: Path) -> str | None:
 
 
 def scan_content(p: Path) -> list[str]:
-    if p.name in ALLOWLIST_NAMES or p.name.endswith(".example.json"):
+    if p.name in ALLOWLIST_NAMES:
         return []
     hits: list[str] = []
     try:

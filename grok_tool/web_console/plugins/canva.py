@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from .base import FieldOption, ToolField, ToolMeta
-from .grok import GrokToolPlugin
 from .sibling import SiblingToolPlugin
 
 
@@ -172,7 +171,7 @@ class CanvaToolPlugin(SiblingToolPlugin):
         return len(bits)
 
     def hotmail_pool(self, root: Path) -> dict[str, Any]:
-        pool = GrokToolPlugin().hotmail_pool(root)
+        pool = super().hotmail_pool(root)
         max_a = 1
         try:
             import json
@@ -188,7 +187,7 @@ class CanvaToolPlugin(SiblingToolPlugin):
             from grokreg.core.config import load_config
             from grokreg.mail.providers import HotmailProvider
 
-            path = GrokToolPlugin()._hotmail_path(root)
+            path = self.hotmail_list_path(root)
             merged = dict(load_config())
             merged["hotmail_max_aliases"] = pool["max_aliases"]
             if path.exists():

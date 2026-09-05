@@ -35,7 +35,6 @@ class NotionToolPlugin(SiblingToolPlugin):
                 default="3",
                 options=[
                     FieldOption("3", "Temp tmail", "tmail.wibucrypto.pro only"),
-                    FieldOption("5", "Domain riêng", "random@domain — forward về Hotmail pool"),
                 ],
             ),
             ToolField(

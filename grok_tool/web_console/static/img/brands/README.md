@@ -33,3 +33,5 @@ Muốn file khác: `ToolMeta.brand_icon = "/static/img/brands/foo.svg"`
 | notion | Cube N chính thức (Notion Labs) trên nền trắng |
 | dreamina | Favicon chính thức dreamina.capcut.com (mark 900×900) |
 | genspark | Official square mark (3 spark + bar) từ genspark.ai/brand/genspark `icon-square.svg` · fallback `apple-touch-icon.png` |
+| openart | Symbol từ logo wordmark chính thức (nền trắng, mark đen) — crop từ ảnh brand user cung cấp |
+| scispace | App mark chính thức scispace.com (`/icon.png` — apple-touch-icon) trên nền trắng |

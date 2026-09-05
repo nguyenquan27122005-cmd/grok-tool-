@@ -33,8 +33,19 @@ from .plugins.base import BaseToolPlugin
 
 logger = logging.getLogger(__name__)
 
+
+def _safe_put(q: "asyncio.Queue", ev: dict[str, Any]) -> None:
+    try:
+        q.put_nowait(ev)
+    except asyncio.QueueFull:
+        pass  # SSE gen() coalesce dồn event — mất 1 tick không sao
+
 # Substrings (lowercased) marking a param/CLI flag as sensitive → masked in logs.
-_SENSITIVE = ("pass", "pwd", "token", "secret", "cookie", "auth", "api_key", "apikey")
+# "accounts"/"codes": ChatGPT params mang nguyên danh sách email|pass|2FA.
+_SENSITIVE = (
+    "pass", "pwd", "token", "secret", "cookie", "auth", "api_key", "apikey",
+    "accounts", "codes", "sso",
+)
 
 _ACTIVE = ("pending", "running", "stopping")
 _MAX_HISTORY_BYTES = 5 * 1024 * 1024
@@ -131,7 +142,9 @@ class Job:
         snap: dict[str, Any] = {
             "id": self.id,
             "tool_id": self.tool_id,
-            "params": self.params,
+            # SSE/REST trả ra client — redact cùng chuẩn như jobs.jsonl
+            # (params "accounts" chứa email|password|2FA nguyên văn).
+            "params": _redact_params(self.params),
             "status": self.status,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -261,9 +274,13 @@ class JobManager:
     def _publish(self, job_id: str, kind: str) -> None:
         with self._lock:
             subs = list(self._subs)
+        ev = {"job_id": job_id, "kind": kind}
         for loop, q in subs:
             try:
-                loop.call_soon_threadsafe(q.put_nowait, {"job_id": job_id, "kind": kind})
+                # _safe_put chạy trong event loop — client treo làm đầy queue
+                # thì DROP event thay vì ném QueueFull vào loop (coalescing ở
+                # phía gen() sẽ tự lấy snapshot mới nhất ở tick sau).
+                loop.call_soon_threadsafe(_safe_put, q, ev)
             except Exception:
                 # loop closed — drop the subscriber
                 with self._lock:
@@ -458,14 +475,19 @@ class JobManager:
             # tự ghi vào kênh nó hiểu (config.json của tool). Lỗi áp dụng không
             # chặn job — chạy tiếp không proxy nhưng báo rõ trong log.
             try:
-                proxy, idx = proxy_pool.pick()
+                proxy, idx, dead = proxy_pool.pick_alive()
+                for d in dead:
+                    job.append_log(f"PROXY: bỏ proxy chết {d}")
+                # luôn gọi — pool tắt thì dọn proxy cũ do pool ghi (marker)
+                cmd = plugin.apply_proxy(cmd, dict(job.params), self.root, proxy)
                 if proxy:
-                    cmd = plugin.apply_proxy(cmd, dict(job.params), self.root, proxy)
                     label = f"PROXY: {proxy_pool.mask(proxy)}"
                     if idx >= 0:
                         label += f" (pool #{idx + 1})"
                     job.append_log(label)
-            except Exception as exc:  # noqa: BLE001
+                else:
+                    job.append_log("PROXY: pool tắt / trống / hết proxy sống — không dùng")
+            except Exception as exc:  # noqa: BLE001 — lỗi áp dụng không chặn job
                 job.append_log(f"PROXY: bỏ qua — {type(exc).__name__}: {exc}")
             cwd = Path(plugin.cwd(self.root))
             env = os.environ.copy()

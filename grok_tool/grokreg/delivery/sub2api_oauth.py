@@ -15,6 +15,7 @@ import json
 import logging
 import random
 import re
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -365,21 +366,27 @@ async def click_continue_email_form(tab: Any) -> bool:
 # ---------------------------------------------------------------------------
 
 
+_name_counter_lock = threading.Lock()
+
+
 def next_account_name(cfg: dict[str, Any]) -> str:
     prefix = (cfg.get("name_prefix") or "grok free").strip()
     start = int(cfg.get("start_number") or 1)
-    n = start
-    try:
-        if COUNTER_FILE.exists():
-            data = json.loads(COUNTER_FILE.read_text(encoding="utf-8"))
-            n = max(int(data.get("next") or start), start)
-    except Exception:
+    with _name_counter_lock:  # read-modify-write phải nguyên khối
         n = start
-    name = f"{prefix} {n:03d}"
-    try:
-        COUNTER_FILE.write_text(json.dumps({"next": n + 1}, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+        try:
+            if COUNTER_FILE.exists():
+                data = json.loads(COUNTER_FILE.read_text(encoding="utf-8"))
+                n = max(int(data.get("next") or start), start)
+        except Exception:
+            n = start
+        name = f"{prefix} {n:03d}"
+        try:
+            tmp = COUNTER_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"next": n + 1}, indent=2), encoding="utf-8")
+            tmp.replace(COUNTER_FILE)  # atomic — crash giữa write = trùng tên
+        except Exception:
+            pass
     return name
 
 
@@ -859,7 +866,8 @@ async def wait_and_extract_oauth_code(tab: Any, timeout: float = 90.0) -> str:
         # callback URL (legacy redirect)
         u = await current_url(tab)
         if is_callback_url(u):
-            log.info("[oauth] callback URL: %s", u[:120])
+            # chỉ log path — query chứa code= OAuth, là credential
+            log.info("[oauth] callback URL (query redacted): %s", u.split("?")[0])
             return u
         found = scan_cdp_tabs_for_callback()
         if found:
@@ -1327,7 +1335,8 @@ async def grok_oauth_email_login(
     while time.time() < deadline:
         url = await current_url(tab)
         if url != last_url:
-            log.info("[oauth] url=%s", url[:150])
+            # log path thôi — query có thể mang code=/token= (credential)
+            log.info("[oauth] url=%s", url.split("?")[0][:150])
             last_url = url
             # re-check CF on every navigation (esp. sign-in?email=true)
             if "accounts.x.ai" in url.lower() or "auth.x.ai" in url.lower():

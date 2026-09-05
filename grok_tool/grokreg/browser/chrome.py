@@ -373,6 +373,11 @@ class BrowserHandle:
     attached: bool  # connected to already-running Chrome
     port: int
     keep_open: bool
+    config: dict = None  # runtime config — close path đọc window_mode/pull_back
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            self.config = {}
 
 
 async def _cf_page_state(tab: Any) -> str:
@@ -1083,6 +1088,9 @@ async def open_or_attach_browser(config: dict[str, Any]) -> BrowserHandle:
     # Guest start: drop previous account identity so batch doesn't open last logged-in user.
     # Competitor: clear SSO only — KEEP cf_clearance / Castle device (full wipe → error_generic).
     antiflag = config.get("antiflag") or {}
+    if not isinstance(antiflag, dict):
+        log.warning("config antiflag sai kiểu (%s) — bỏ qua", type(antiflag).__name__)
+        antiflag = {}
     want_cookies = bool(antiflag.get("clear_cookies_on_start", False))
     want_storage = bool(antiflag.get("clear_storage_on_start", False))
     force_guest = config.get("force_guest_on_start", True)
@@ -1253,6 +1261,13 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object {{
             )
     except Exception as e:
         log.debug("post-stop chrome cleanup: %s", e)
+    # GC profile cũ (pipeline _cleanup_old_profiles của anti_flag từng chết vì
+    # không ai gọi) — dọn >24h sau mỗi lần close, giữ tối đa 5 profile mới nhất
+    try:
+        if isinstance(cfg, dict) and cfg.get("_profile_dir"):
+            af._cleanup_old_profiles(ROOT)
+    except Exception as e:
+        log.debug("profile GC: %s", e)
 
 
 async def detect_page_step(tab: Any) -> str:

@@ -496,6 +496,13 @@ class MailApiClient:
         rt = session.refresh_token or ""
         if not rt:
             return None
+        # Cache ~50 phút: mỗi sweep poll trước đây mua lại token tới 4 POST
+        cache = getattr(self, "_ms_token_cache", None)
+        if cache is None:
+            cache = self._ms_token_cache = {}
+        cached = cache.get(rt)
+        if cached and cached[0] > time.time():
+            return cached[1]
         cid = self._client_id(session)
         for token_url in (
             "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
@@ -519,6 +526,7 @@ class MailApiClient:
                     if r.status_code == 200:
                         access = r.json().get("access_token")
                         if access:
+                            cache[rt] = (time.time() + 3000, access)
                             return access
                 except Exception:
                     continue

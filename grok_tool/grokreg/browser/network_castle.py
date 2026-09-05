@@ -59,6 +59,13 @@ from grokreg.browser.jsutil import _exec_js, _unwrap_js_result  # noqa: F401
 from grokreg.core.config import load_config
 from grokreg.core.helpers import extract_otp, normalize_otp_for_input
 
+# Module-level: `from network_castle import *` không export tên `_…`, nên
+# flow.py import thẳng hai dict này — chúng phải tồn tại ngay khi import.
+_NET_CAPTURE_ON = False
+_NET_RESPONSES: dict[str, dict] = {}
+_NET_REQUESTS: dict[str, dict] = {}
+
+
 async def enable_network_capture(tab: Any) -> None:
     """Enable CDP Network domain + store request/response (like DevTools Network)."""
     global _NET_CAPTURE_ON, _NET_RESPONSES, _NET_REQUESTS

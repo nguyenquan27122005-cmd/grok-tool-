@@ -1,4 +1,4 @@
-"""
+﻿"""
 Durable background delivery for Sub2API (and optional sheet) after reg success.
 
 Competitor pattern: reg success is independent of upload success.
@@ -36,7 +36,17 @@ def _load_queue() -> list[dict[str, Any]]:
             if isinstance(data, list):
                 return [x for x in data if isinstance(x, dict)]
     except Exception as e:
-        log.warning("[delivery] load queue failed: %s", e)
+        # File hỏng KHÔNG được coi như queue rỗng — save kế tiếp sẽ xoá sạch
+        # các delivery đang chờ. Đổi tên file hỏng sang .corrupt-* để giữ data,
+        # queue chạy tiếp từ trạng thái rỗng (người có thể merge lại tay).
+        try:
+            corrupt = QUEUE_FILE.with_suffix(f".corrupt-{int(time.time())}.json")
+            QUEUE_FILE.replace(corrupt)
+            log.error(
+                "[delivery] queue file corrupt — moved to %s (%s)", corrupt, e
+            )
+        except Exception:
+            log.error("[delivery] queue file corrupt and cannot be moved: %s", e)
     return []
 
 
@@ -47,7 +57,7 @@ def _save_queue(items: list[dict[str, Any]]) -> None:
         tmp.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(QUEUE_FILE)
     except Exception as e:
-        log.warning("[delivery] save queue failed: %s", e)
+        log.error("[delivery] save queue FAILED — data at risk: %s", e)
 
 
 def enqueue_sub2api(
@@ -108,13 +118,15 @@ def enqueue_sub2api(
     with _lock:
         items = _load_queue()
         # de-dupe by email+kind pending
+        # Audit fix 2026-09: bỏ cả record 'failed' cùng email — re-enqueue sau
+        # khi max_attempts cạn từng tạo account TRÙNG trên Sub2API.
         items = [
             x
             for x in items
             if not (
                 x.get("kind") == "sub2api"
                 and str(x.get("email") or "").lower() == email.lower()
-                and x.get("status") in ("pending", "retrying")
+                and x.get("status") in ("pending", "retrying", "failed")
             )
         ]
         items.append(rec)
@@ -145,13 +157,39 @@ def process_queue_once(
     from grokreg.delivery.sub2api_client import Sub2APIError, export_sso_to_sub2api
 
     completed = 0
+    now = datetime.now(timezone.utc)
     with _lock:
         items = _load_queue()
+        # "processing" = attempt đang chạy (reserve chống double-import khi
+        # worker 60s tick chồng với drain tay). Quá 30 phút không cập nhật
+        # (process chết giữa chừng) → coi như bỏ và cho thử lại.
+        def _is_stale_processing(x: dict[str, Any]) -> bool:
+            try:
+                ts = datetime.strptime(
+                    str(x.get("updated_at") or ""), "%Y-%m-%dT%H:%M:%SZ"
+                ).replace(tzinfo=timezone.utc)
+            except ValueError:
+                return True
+            return (now - ts).total_seconds() > 1800
+
         pending = [
             x
             for x in items
-            if x.get("kind") == "sub2api" and x.get("status") in ("pending", "retrying")
+            if x.get("kind") == "sub2api"
+            and (
+                x.get("status") in ("pending", "retrying")
+                or (x.get("status") == "processing" and _is_stale_processing(x))
+            )
         ][:limit]
+        if pending:
+            # Reserve NGAY trước khi chạy — attempt có thể mất vài phút,
+            # tick của worker trong lúc đó không được nhặt lại record này.
+            reserved = {x.get("id") for x in pending}
+            for x in items:
+                if x.get("id") in reserved:
+                    x["status"] = "processing"
+                    x["updated_at"] = _now_iso()
+            _save_queue(items)
 
     for rec in pending:
         rid = rec.get("id")

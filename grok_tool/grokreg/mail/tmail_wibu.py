@@ -556,7 +556,8 @@ class TmailWibuProvider:
                 # try extract from each message blob + try open by id
                 for msg in messages:
                     mid = str(msg.get("id") or msg.get("uid") or "")
-                    if mid and mid in seen and not msg.get("body"):
+                    if mid and mid in seen:
+                        # đã xử lý — mở lại body qua Livewire tốn ~4 POST/poll
                         continue
                     blob = self._msg_blob(msg)
                     otp = self._try_extract(blob, looks_required=True)
@@ -701,9 +702,12 @@ class TmailWibuProvider:
     def _restore_cookies(self, cookies: dict[str, Any]) -> None:
         if not cookies:
             return
+        from urllib.parse import urlparse as _up
+
+        domain = _up(self.base).hostname or "tmail.wibucrypto.pro"
         for k, v in cookies.items():
             try:
-                self._http.cookies.set(str(k), str(v), domain="tmail.wibucrypto.pro")
+                self._http.cookies.set(str(k), str(v), domain=domain)
             except Exception:
                 try:
                     self._http.cookies.set(str(k), str(v))

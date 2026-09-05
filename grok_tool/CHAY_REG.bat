@@ -7,6 +7,8 @@ title Grok Register Tool
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 set PYTHONUNBUFFERED=1
+:: CloakBrowser Chromium cache — giữ trên ổ D, tránh ổ C
+set CLOAKBROWSER_CACHE_DIR=%~dp0\.cloakbrowser
 
 if not exist "venv\Scripts\python.exe" (
     echo [LOI] Chua co venv.
